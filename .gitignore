@@ -1,2 +1,8 @@
 #VSCode stuff
 .vscode/
+
+*.root
+
+datasets/
+
+skimmed_datasets/
