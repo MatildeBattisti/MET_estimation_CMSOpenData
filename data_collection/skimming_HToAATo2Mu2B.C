@@ -3,7 +3,7 @@
 #include <TFile.h>
 #include <iostream>
 
-void data_skimming_specific() {
+void skimming_HToAATo2Mu2B() {
     /**
      * @brief Selects the TTree 'Events' from CMS Open Data file.
      */

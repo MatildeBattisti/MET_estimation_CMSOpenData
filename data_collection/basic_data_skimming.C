@@ -13,7 +13,10 @@ void basic_data_skimming() {
     //chain->Add("../datasets/HToAATo2Mu2B/DB4AFAC8-16AD-AB48-82D2-1E9DAE8AB314.root");  // dataset 2
     //chain->Add("../datasets/HToAATo2Mu2B/048A040C-DA63-1949-9BA7-075371EB4296.root");  // dataset 3
    
-    chain->Add("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");
+    //chain->Add("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");
+    //chain->Add("../datasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");
+
+    chain->Add("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
 
     /**
      * @brief Sets all branch statuses to zero.
@@ -33,7 +36,7 @@ void basic_data_skimming() {
     Float_t MET_significance;
     Float_t GenMET_pt;
 
-    const int maxNJets = 19;
+    const int maxNJets = 25;
 
     Float_t Jet_area[maxNJets];
     Float_t Jet_eta[maxNJets];
@@ -159,7 +162,7 @@ void basic_data_skimming() {
      * If already existent, it recreates it.
      * 
      */
-    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_ZZZ.root", "RECREATE");
+    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_ZZTo2L2Nu_0.root", "RECREATE");
 
     /**
      * @brief Writes the new tree than closes the new file.

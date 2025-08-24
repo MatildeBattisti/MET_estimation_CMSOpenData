@@ -1,8 +1,13 @@
 #VSCode stuff
 .vscode/
 
+# ROOT files
 *.root
 
+# Directories containing ROOT files
 datasets/
 
 skimmed_datasets/
+
+# Typst files for documentation
+*.typ

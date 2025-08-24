@@ -1,5 +1,8 @@
-# XGBoost has to be imported before ROOT to avoid crashes because of clashing
-from xgboost import XGBRegressor
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Input, Dense
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -57,7 +60,7 @@ def read_data():
 
 
 """
-    Data parsing to work with XGB.
+    Data parsing to work with Keras.
 """
 def data_parsing(data):
     features = np.array([
@@ -136,6 +139,32 @@ def data_analysis(branches, features, target):
 
 
 """
+    Defines the NN model
+"""
+def create_model(input_dim, n_layers, n_units, learning_rate):
+    # Defining model type
+    model = Sequential()
+
+    # Input layer
+    model.add(Input(shape=(input_dim,)))
+
+    # Adding hidden layers
+    for layer in range(n_layers):
+        model.add(Dense(n_units, activation="relu"))
+
+    # Output layer for regression
+    model.add(Dense(1, activation='linear'))
+
+    model.compile(
+        optimizer = Adam(learning_rate=learning_rate),
+        loss = "mse",
+        metrics = ['mse']
+    )
+    return model
+
+
+
+"""
     Searches the best regression model:
     - divides dataset into training and testing;
     - normalizes features;
@@ -157,12 +186,10 @@ def search_best_model(features, target):
 
     # Hyper-parameters searching grid
     hparam_grid = {
-        'n_estimators': [100, 300, 500],
-        'learning_rate': [0.05, 0.1, 0.3],
-        'max_depth': [4, 6, 8],
-        'min_child_weight': [1, 2, 4]
-        #'subsample': [1],
-        #'colsample_bytree': [1],
+        'n_layers': [1, 2, 4],
+        'n_units': [32, 64, 128],
+        'batch_size': [32, 64, 128],
+        'learning_rate': [1e-3, 1e-4],
     }
 
     # K-Fold CV
@@ -191,18 +218,22 @@ def search_best_model(features, target):
             x_train, x_val = X_train_scaled[train_idx], X_train_scaled[val_idx]
             y_train_split, y_val = y_train[train_idx], y_train[val_idx]
 
-            model = XGBRegressor(
-                objective='reg:squarederror',
-                eval_metric='rmse',
-                early_stopping_rounds=20,
-                random_state=42,
-                **params
+            model = create_model(
+                input_dim=x_train.shape[1],
+                n_layers=params['n_layers'],
+                n_units=params['n_units'],
+                learning_rate=params['learning_rate']
             )
+
+            early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
             model.fit(
                 x_train, y_train_split,
-                eval_set=[(x_val, y_val)],
-                verbose=False  # cambiare a True
+                batch_size=params['batch_size'],
+                epochs=100,
+                validation_data=(x_val, y_val),
+                verbose=0,  # cambiare a 1
+                callbacks=[early_stop]
             )
 
             y_pred = model.predict(x_val)
@@ -219,6 +250,7 @@ def search_best_model(features, target):
 
     print(f"✅ Best Parameters Found:\n {best_params}")
     print(f"   Best Avg RMSE: {best_score:.4f}")
+
 
     elapsed_time = time.time() - starting_time
     print(f"✅ Best parameters search completed in {elapsed_time}s")
@@ -244,18 +276,22 @@ def testing(X_train, y_train, X_test_scaled, best_params):
     X_tr_scaled = scaler.fit_transform(X_tr)
     X_val_scaled = scaler.transform(X_val)
 
-    best_model = XGBRegressor(
-        objective='reg:squarederror',
-        eval_metric='rmse',
-        early_stopping_rounds=20,
-        random_state = 42,
-        **best_params
+    best_model = create_model(
+        input_dim=X_tr_scaled.shape[1],
+        n_layers=best_params['n_layers'],
+        n_units=best_params['n_units'],
+        learning_rate=best_params['learning_rate']
     )
+
+    early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
     best_model.fit(
         X_tr_scaled, y_tr,
-        eval_set=[(X_val_scaled, y_val)],
-        verbose=True
+        batch_size=best_params['batch_size'],
+        epochs=100,
+        validation_data=(X_val_scaled, y_val),
+        verbose=0,  # cambiare a 1
+        callbacks=[early_stop]
     )
 
     y_test_pred = best_model.predict(X_test_scaled)
@@ -279,15 +315,6 @@ def results_evaluation(y_test, y_test_pred):
     print(f"Target-Prediction MAE: {mae}")
     print(f"Target-Prediction R²: {r2}")
     return rmse, mae, r2
-
-
-
-"""
-    Evaluates the importance of the features used in the retraining.
-"""
-def top_features(branches, features, best_model):
-
-    return
 
 
 
