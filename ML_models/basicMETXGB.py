@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
     Extracts them with uproot method .arrays().
 """
 def read_data():
-    file = uproot.open("../skimmed_datasets/skimmed_ZZTo2L2Nu_0.root")
+    file = uproot.open("../skimmed_datasets/skimmed_ZZTo2L2Nu_0_v1.root")
     tree = file["Events"]
 
     branches = [
@@ -44,6 +44,11 @@ def read_data():
         "MET_covXX",
         "MET_covXY",
         "MET_covYY",
+        "PV_chi2",
+        "PV_score",
+        "PV_x",
+        "PV_y",
+        "PV_z",
         "GenMET_pt"
     ]
 
@@ -82,7 +87,12 @@ def data_parsing(data):
         data["MET_significance"],
         data["MET_covXX"],
         data["MET_covXY"],
-        data["MET_covYY"]
+        data["MET_covYY"],
+        data["PV_chi2"],
+        data["PV_score"],
+        data["PV_x"],
+        data["PV_y"],
+        data["PV_z"],
     ]).T
 
     target = data["GenMET_pt"]
@@ -161,8 +171,6 @@ def search_best_model(features, target):
         'learning_rate': [0.05, 0.1, 0.3],
         'max_depth': [4, 6, 8],
         'min_child_weight': [1, 2, 4]
-        #'subsample': [1],
-        #'colsample_bytree': [1],
     }
 
     # K-Fold CV

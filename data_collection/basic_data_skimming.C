@@ -28,6 +28,7 @@ void basic_data_skimming() {
      * The entries have name and type of the original ones.
      */
     UInt_t nJet;
+
     Float_t MET_pt;
     Float_t MET_phi;
     Float_t MET_covXX;
@@ -35,6 +36,12 @@ void basic_data_skimming() {
     Float_t MET_covYY;
     Float_t MET_significance;
     Float_t GenMET_pt;
+
+    Float_t PV_chi2;
+    Float_t PV_score;
+    Float_t PV_x;
+    Float_t PV_y;
+    Float_t PV_z;
 
     const int maxNJets = 25;
 
@@ -49,6 +56,7 @@ void basic_data_skimming() {
      * status to one.
      */
     chain->SetBranchStatus("nJet", 1);
+
     chain->SetBranchStatus("MET_pt", 1);
     chain->SetBranchStatus("MET_phi", 1);
     chain->SetBranchStatus("MET_covXX", 1);
@@ -56,6 +64,12 @@ void basic_data_skimming() {
     chain->SetBranchStatus("MET_covYY", 1);
     chain->SetBranchStatus("MET_significance", 1);
     chain->SetBranchStatus("GenMET_pt", 1);
+
+    chain->SetBranchStatus("PV_chi2", 1);
+    chain->SetBranchStatus("PV_score", 1);
+    chain->SetBranchStatus("PV_x", 1);
+    chain->SetBranchStatus("PV_y", 1);
+    chain->SetBranchStatus("PV_z", 1);
 
     chain->SetBranchStatus("Jet_area", 1);
     chain->SetBranchStatus("Jet_eta", 1);
@@ -76,6 +90,12 @@ void basic_data_skimming() {
     chain->SetBranchAddress("MET_significance", &MET_significance);
     chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
 
+    chain->SetBranchAddress("PV_chi2", &PV_chi2);
+    chain->SetBranchAddress("PV_score", &PV_score);
+    chain->SetBranchAddress("PV_x", &PV_x);
+    chain->SetBranchAddress("PV_y", &PV_y);
+    chain->SetBranchAddress("PV_z", &PV_z);
+
     chain->SetBranchAddress("Jet_area", &Jet_area);
     chain->SetBranchAddress("Jet_eta", &Jet_eta);
     chain->SetBranchAddress("Jet_pt", &Jet_pt);
@@ -86,6 +106,56 @@ void basic_data_skimming() {
      * @brief Clone full TTree structure (not the content).
      */
     TTree *newtree = chain->CloneTree(0);
+
+    /**
+     * @param n_events Number of events in each file
+     */
+    Long64_t n_events = chain->GetEntries();
+
+    /**
+     * @brief Gets the maximum number of jets.
+     */
+    Float_t max_nJet;
+
+    for (Long64_t i = 0; i < n_events; ++i) {
+        chain->GetEntry(i);
+        if (nJet > max_nJet) {
+            max_nJet = nJet;
+        }
+    }
+
+    std::cout << "Max number of Jets is: " << max_nJet << std::endl;
+
+    /**
+     * @brief Calculate mean and standard deviation of GenMET
+     * to later perform a statistical cut on outliers.
+     */
+    Float_t sum = 0.0;
+    Float_t sum2 = 0.0;
+    Long64_t count = 0;
+
+    for (Long64_t i = 0; i < n_events; ++i) {
+        chain->GetEntry(i);
+        sum += GenMET_pt;
+        count++;
+    }
+
+    Float_t GenMET_mean = sum / count;
+    Float_t GenMET_variance_num = 0.0;
+
+    for (Long64_t i = 0; i < n_events; ++i) {
+        chain->GetEntry(i);
+        GenMET_variance_num += (GenMET_pt - GenMET_mean)*(GenMET_pt - GenMET_mean);
+    }
+
+    Float_t GenMET_variance = GenMET_variance_num / count;
+    Float_t GenMET_std = std::sqrt(GenMET_variance);
+
+    Float_t GenMET_cut = GenMET_mean + 5*GenMET_std;
+
+    std::cout << "Mean GenMET_pt: " << GenMET_mean << std::endl;
+    std::cout << "Standard deviation GenMET_pt: " << GenMET_std << std::endl;
+    std::cout << "GenMET_pt cut performed at: " << GenMET_cut << std::endl;
 
     /**
      * @brief Selects only the first three jets and
@@ -118,51 +188,44 @@ void basic_data_skimming() {
     newtree->Branch("Jet_phi_rd", &Jet_phi_rd);
     newtree->Branch("Jet_mass_rd", &Jet_mass_rd);
 
-    Float_t max_nJet;
-
-    Long64_t n_events = chain->GetEntries();
+    
 
     for (Long64_t i = 0; i < n_events; ++i) {
         chain->GetEntry(i);
-
-        // Max number of Jets
-        if (nJet > max_nJet) {
-            max_nJet = nJet;
-        }
-
-        // First Jet
-        Jet_area_st = (nJet > 0) ? Jet_area[0] : 0.0f;
-        Jet_eta_st = (nJet > 0) ? Jet_eta[0] : 0.0f;
-        Jet_pt_st = (nJet > 0) ? Jet_pt[0] : 0.0f;
-        Jet_phi_st = (nJet > 0) ? Jet_phi[0] : 0.0f;
-        Jet_mass_st = (nJet > 0) ? Jet_mass[0] : 0.0f;
-        
-        // Second Jet
-        Jet_area_nd = (nJet > 1) ? Jet_area[1] : 0.0f;
-        Jet_eta_nd = (nJet > 1) ? Jet_eta[1] : 0.0f;
-        Jet_pt_nd = (nJet > 1) ? Jet_pt[1] : 0.0f;
-        Jet_phi_nd = (nJet > 1) ? Jet_phi[1] : 0.0f;
-        Jet_mass_nd = (nJet > 1) ? Jet_mass[1] : 0.0f;
-        
-        // Third Jet
-        Jet_area_rd = (nJet > 2) ? Jet_area[2] : 0.0f;
-        Jet_eta_rd = (nJet > 2) ? Jet_eta[2] : 0.0f;
-        Jet_pt_rd = (nJet > 2) ? Jet_pt[2] : 0.0f;
-        Jet_phi_rd = (nJet > 2) ? Jet_phi[2] : 0.0f;
-        Jet_mass_rd = (nJet > 2) ? Jet_mass[2] : 0.0f;
+        // GenMET_cut as a condition for events
+        if (GenMET_pt<GenMET_cut) {
+            // First Jet
+            Jet_area_st = (nJet > 0) ? Jet_area[0] : 0.0f;
+            Jet_eta_st = (nJet > 0) ? Jet_eta[0] : 0.0f;
+            Jet_pt_st = (nJet > 0) ? Jet_pt[0] : 0.0f;
+            Jet_phi_st = (nJet > 0) ? Jet_phi[0] : 0.0f;
+            Jet_mass_st = (nJet > 0) ? Jet_mass[0] : 0.0f;
+            
+            // Second Jet
+            Jet_area_nd = (nJet > 1) ? Jet_area[1] : 0.0f;
+            Jet_eta_nd = (nJet > 1) ? Jet_eta[1] : 0.0f;
+            Jet_pt_nd = (nJet > 1) ? Jet_pt[1] : 0.0f;
+            Jet_phi_nd = (nJet > 1) ? Jet_phi[1] : 0.0f;
+            Jet_mass_nd = (nJet > 1) ? Jet_mass[1] : 0.0f;
+            
+            // Third Jet
+            Jet_area_rd = (nJet > 2) ? Jet_area[2] : 0.0f;
+            Jet_eta_rd = (nJet > 2) ? Jet_eta[2] : 0.0f;
+            Jet_pt_rd = (nJet > 2) ? Jet_pt[2] : 0.0f;
+            Jet_phi_rd = (nJet > 2) ? Jet_phi[2] : 0.0f;
+            Jet_mass_rd = (nJet > 2) ? Jet_mass[2] : 0.0f;
 
         // Fill Tree with new entries
         newtree->Fill();
+        }    
     }
-
-    std::cout << "Max number of Jets is: " << max_nJet;
 
     /**
      * @brief Creates blank new file to collect skimmed data.
      * If already existent, it recreates it.
      * 
      */
-    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_ZZTo2L2Nu_0.root", "RECREATE");
+    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_ZZTo2L2Nu_0_v1.root", "RECREATE");
 
     /**
      * @brief Writes the new tree than closes the new file.

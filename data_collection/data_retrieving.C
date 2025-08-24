@@ -12,8 +12,8 @@ void data_retrieving() {
     //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/77DB0F5B-4123-4E4B-A9D0-3CEBA8575834.root");  // dataset 2
     //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/048A040C-DA63-1949-9BA7-075371EB4296.root");  // dataset 3
 
-    //TFile *file = TFile::Open("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");
-    TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZZ.root");
+    TFile *file = TFile::Open("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZZ.root");
 
     if (!file || file->IsZombie()) {
         std::cerr << "Error opening file." << std::endl;
