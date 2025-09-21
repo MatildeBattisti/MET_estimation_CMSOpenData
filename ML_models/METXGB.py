@@ -5,11 +5,14 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import pearsonr, spearmanr
 import numpy as np
+import pandas as pd
 from itertools import product
 import uproot
 import time
 
-import matplotlib.pyplot as plt
+# For later parsing
+#np.set_printoptions(threshold=np.inf)
+#np.set_printoptions(linewidth=np.inf)
 
 
 
@@ -18,38 +21,57 @@ import matplotlib.pyplot as plt
     Extracts them with uproot method .arrays().
 """
 def read_data():
-    file = uproot.open("../skimmed_datasets/specific_skimmed_ZZZ.root")
+    file = uproot.open("../skimmed_datasets/skimmed_ZZTo2L2Nu.root")
     tree = file["Events"]
 
     # Generic skimming
+    branches = [
+        "nJet",
+        "MET_pt",
+        "MET_phi",
+        "MET_significance",
+        "MET_covXX",
+        "MET_covXY",
+        "MET_covYY",
+        "PV_chi2",
+        "PV_score",
+        "PV_x",
+        "PV_y",
+        "PV_z",
+        "nSV",
+        "GenMET_pt"
+    ]
+
+    # Skimming ZZZ
     #branches = [
-    #    "nJet",
-    #    "Jet_area_st",
-    #    "Jet_eta_st",
-    #    "Jet_pt_st",
-    #    "Jet_phi_st",
-    #    "Jet_mass_st",
-    #    "Jet_area_nd",
-    #    "Jet_eta_nd",
-    #    "Jet_pt_nd",
-    #    "Jet_phi_nd",
-    #    "Jet_mass_nd",
-    #    "Jet_area_rd",
-    #    "Jet_eta_rd",
-    #    "Jet_pt_rd",
-    #    "Jet_phi_rd",
-    #    "Jet_mass_rd",
     #    "MET_pt",
     #    "MET_phi",
-    #    "MET_significance",
     #    "MET_covXX",
     #    "MET_covXY",
     #    "MET_covYY",
+    #    "MET_significance",
     #    "PV_chi2",
     #    "PV_score",
     #    "PV_x",
     #    "PV_y",
     #    "PV_z",
+    #    "nSV",
+    #    "SV_charge_st",
+    #    "SV_chi2_st",
+    #    "SV_dxy_st",
+    #    "SV_pAngle_st",
+    #    "Jet_area_st",
+    #    "Jet_eta_st",
+    #    "Jet_mass_st",
+    #    "Jet_phi_st",
+    #    "Jet_pt_st",
+    #    "Jet_btag_st",
+    #    "Jet_area_nd",
+    #    "Jet_eta_nd",
+    #    "Jet_mass_nd",
+    #    "Jet_phi_nd",
+    #    "Jet_pt_nd",
+    #    "Jet_btag_nd",
     #    "GenMET_pt"
     #]
 
@@ -144,45 +166,9 @@ def read_data():
     #    "GenMET_pt"
     #]
 
-    # Skimming ZZZ
-    branches = [
-        "MET_pt",
-        "MET_phi",
-        "MET_covXX",
-        "MET_covXY",
-        "MET_covYY",
-        "MET_significance",
-        "PV_chi2",
-        "PV_score",
-        "PV_x",
-        "PV_y",
-        "PV_z",
-        "nSV",
-        "SV_charge_st",
-        "SV_chi2_st",
-        "SV_dxy_st",
-        "SV_pAngle_st",
-        "Jet_area_st",
-        "Jet_eta_st",
-        "Jet_mass_st",
-        "Jet_phi_st",
-        "Jet_pt_st",
-        "Jet_btag_st",
-        "Jet_area_nd",
-        "Jet_eta_nd",
-        "Jet_mass_nd",
-        "Jet_phi_nd",
-        "Jet_pt_nd",
-        "Jet_btag_nd",
-        "GenMET_pt"
-    ]
-
-
     data = tree.arrays(branches, library="np")
 
-    #Insert check for np arrays
-
-    print(f'✅ Read data from .root file')
+    print(f"✅ Read data from .root file")
     return branches, data
 
 
@@ -191,34 +177,51 @@ def read_data():
     Data parsing to work with XGB.
 """
 def data_parsing(data):
+    features = np.array([
+        data["nJet"],
+        data["MET_pt"],
+        data["MET_phi"],
+        data["MET_significance"],
+        data["MET_covXX"],
+        data["MET_covXY"],
+        data["MET_covYY"],
+        data["PV_chi2"],
+        data["PV_score"],
+        data["PV_x"],
+        data["PV_y"],
+        data["PV_z"],
+        data["nSV"],
+    ]).T
+
     #features = np.array([
-    #    data["nJet"],
-    #    data["Jet_area_st"],
-    #    data["Jet_eta_st"],
-    #    data["Jet_pt_st"],
-    #    data["Jet_phi_st"],
-    #    data["Jet_mass_st"],
-    #    data["Jet_area_nd"],
-    #    data["Jet_eta_nd"],
-    #    data["Jet_pt_nd"],
-    #    data["Jet_phi_nd"],
-    #    data["Jet_mass_nd"],
-    #    data["Jet_area_rd"],
-    #    data["Jet_eta_rd"],
-    #    data["Jet_pt_rd"],
-    #    data["Jet_phi_rd"],
-    #    data["Jet_mass_rd"],
     #    data["MET_pt"],
     #    data["MET_phi"],
-    #    data["MET_significance"],
     #    data["MET_covXX"],
     #    data["MET_covXY"],
     #    data["MET_covYY"],
+    #    data["MET_significance"],
     #    data["PV_chi2"],
     #    data["PV_score"],
     #    data["PV_x"],
     #    data["PV_y"],
     #    data["PV_z"],
+    #    data["nSV"],
+    #    data["SV_charge_st"],
+    #    data["SV_chi2_st"],
+    #    data["SV_dxy_st"],
+    #    data["SV_pAngle_st"],
+    #    data["Jet_area_st"],
+    #    data["Jet_eta_st"],
+    #    data["Jet_mass_st"],
+    #    data["Jet_phi_st"],
+    #    data["Jet_pt_st"],
+    #    data["Jet_btag_st"],
+    #    data["Jet_area_nd"],
+    #    data["Jet_eta_nd"],
+    #    data["Jet_mass_nd"],
+    #    data["Jet_phi_nd"],
+    #    data["Jet_pt_nd"],
+    #    data["Jet_btag_nd"]
     #]).T
 
     #features = np.array([
@@ -272,7 +275,6 @@ def data_parsing(data):
     #    data["MET_covXY"],
     #    data["MET_covYY"],
     #    data["MET_significance"],
-    #    data["GenMET_pt"],
     #    data["PV_chi2"],
     #    data["PV_score"],
     #    data["PV_x"],
@@ -306,43 +308,12 @@ def data_parsing(data):
     #    data["Muon_phi_st"],
     #    data["Muon_phi_nd"],
     #    data["Muon_pt_st"],
-    #    data["Muon_pt_nd"]
+    #    data["Muon_pt_nd"],
     #]).T
-
-    features = np.array([
-        data["MET_pt"],
-        data["MET_phi"],
-        data["MET_covXX"],
-        data["MET_covXY"],
-        data["MET_covYY"],
-        data["MET_significance"],
-        data["PV_chi2"],
-        data["PV_score"],
-        data["PV_x"],
-        data["PV_y"],
-        data["PV_z"],
-        data["nSV"],
-        data["SV_charge_st"],
-        data["SV_chi2_st"],
-        data["SV_dxy_st"],
-        data["SV_pAngle_st"],
-        data["Jet_area_st"],
-        data["Jet_eta_st"],
-        data["Jet_mass_st"],
-        data["Jet_phi_st"],
-        data["Jet_pt_st"],
-        data["Jet_btag_st"],
-        data["Jet_area_nd"],
-        data["Jet_eta_nd"],
-        data["Jet_mass_nd"],
-        data["Jet_phi_nd"],
-        data["Jet_pt_nd"],
-        data["Jet_btag_nd"]
-    ]).T
 
     target = data["GenMET_pt"]
 
-    print(f'✅ Shape of features and target:')
+    print(f"✅ Shape of features and target:")
     print(f"(N events, N features): {features.shape}")
     print(f"(N events, N target): {target.shape}")
     return features, target
@@ -354,6 +325,17 @@ def data_parsing(data):
     Evaluates target's data for later analysis.
 """
 def data_analysis(branches, features, target):
+    # Using pandas
+    df = pd.DataFrame(features, columns=branches[:-1])
+    df["GenMET_pt"] = target
+
+    # Pearson
+    pearson_corr = df.corr(method='pearson')
+    pearson_corr.to_csv("../results/ZZTo2L2Nu_results/skimmed/pearson_corr.csv")
+
+    # Spearman
+    spearman_corr = df.corr(method='spearman')
+    spearman_corr.to_csv("../results/ZZTo2L2Nu_results/skimmed/spearman_corr.csv")
 
     # Pearson correlation
     Pcorrs = []
@@ -380,7 +362,7 @@ def data_analysis(branches, features, target):
         print(f"{name:25s}: {corr:.4f}")
 
     # Target data analysis
-    print(f'✅ Target data analysis:')
+    print(f"✅ Target data analysis:")
     print(f"GenMET MIN: {np.min(target)}")
     print(f"GenMET MAX: {np.max(target)}")
     print(f"GenMET MEAN: {np.mean(target)}")
@@ -522,24 +504,33 @@ def testing(X_train, y_train, X_test_scaled, best_params):
 """
     Evaluates the prediction made by the model over the test set.
 """
-def results_evaluation(y_test, y_test_pred):
-    rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-    mae = mean_absolute_error(y_test, y_test_pred)
-    r2 = r2_score(y_test, y_test_pred)
+def results_evaluation(data, y_test, y_test_pred):
+    MET_pt = data["MET_pt"]
+    GenMET_pt = data["GenMET_pt"]
+
+    original_rmse = np.sqrt(mean_squared_error(MET_pt, GenMET_pt))
+    original_mae = mean_absolute_error(MET_pt, GenMET_pt)
+    original_r2 = r2_score(MET_pt, GenMET_pt)
+
+    predicted_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+    predicted_mae = mean_absolute_error(y_test, y_test_pred)
+    predicted_r2 = r2_score(y_test, y_test_pred)
+
+    stats = {
+        "RMSE_GenMET_vs_MET_pt": original_rmse,
+        "MAE_GenMET_vs_MET_pt": original_mae,
+        "R2_GenMET_vs_MET_pt": original_r2,
+        "RMSE_GenMET_vs_Prediction": predicted_rmse,
+        "MAE_GenMET_vs_Prediction": predicted_mae,
+        "R2_GenMET_vs_Prediction": predicted_r2
+    }
+
+    pd.DataFrame([stats]).to_csv("../results/ZZTo2L2Nu_results/skimmed/summary_stats.csv", index=False)
 
     print(f"✅ Evaluation metrics for the model:")
-    print(f"Target-Prediction RMSE: {rmse}")
-    print(f"Target-Prediction MAE: {mae}")
-    print(f"Target-Prediction R²: {r2}")
-    return rmse, mae, r2
-
-
-
-"""
-    Evaluates the importance of the features used in the retraining.
-"""
-def top_features(branches, features, best_model):
-
+    print(f"Target-Prediction RMSE: {predicted_rmse}")
+    print(f"Target-Prediction MAE: {predicted_mae}")
+    print(f"Target-Prediction R²: {predicted_r2}")
     return
 
 
@@ -558,18 +549,17 @@ if __name__ == '__main__':
 
     y_test_pred = testing(X_train, y_train, X_test_scaled, best_params)
 
-    rmse, mae, r2 = results_evaluation(y_test, y_test_pred)
+    results_evaluation(data, y_test, y_test_pred)
 
-    plt.figure(figsize=(8, 6))
-    plt.scatter(y_test, y_test_pred, color='blue', alpha=0.6)
+    # Save in files
+    scatter_MET = pd.DataFrame({
+        "MET_pt": data["MET_pt"],
+        "GenMET_pt": target
+    })
+    scatter_MET.to_json("../results/ZZTo2L2Nu_results/skimmed/MET_vs_GenMET.json", orient="records")
 
-    min_val = min(y_test.min(), y_test_pred.min())
-    max_val = max(y_test.max(), y_test_pred.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='y = x')
-    
-    plt.title('Scatter Plot of Predicted vs True')
-    plt.xlabel('TrueMET')
-    plt.ylabel('PredictedMET')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    scatter_test = pd.DataFrame({
+        "y_test": y_test,
+        "y_test_pred": y_test_pred
+    })
+    scatter_test.to_json("../results/ZZTo2L2Nu_results/skimmed/METpred_vs_GenMET.json", orient="records")

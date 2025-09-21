@@ -23,9 +23,11 @@ You can find the specific datasets that I used here:
 The analysis follows a two-phase approach:
 
 **Common Parameter Analysis**
+
 Initially, only relevant parameters common to all three datasets are fed to the ML models. This ensures a fair comparison across different physics processes and establishes a baseline for MET estimation performance.
 
 **Dataset-Specific Skimming**
+
 In the second phase, dataset-specific feature selection and skimming are performed for each physics process. This targeted approach allows us to:
 - optimize feature sets for each specific physics signature;
 - investigate how dataset-specific variables influence MET estimation;
