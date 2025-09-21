@@ -1,0 +1,354 @@
+#include <TTree.h>
+#include <TChain.h>
+#include <TFile.h>
+#include <iostream>
+
+/**
+ * @brief Defines input global variables used both in helper functions and main.
+ * Only selects entries interesting for the ML model.
+ * The entries have name and type of the dataset Branches.
+ */
+Float_t MET_pt;
+Float_t MET_phi;
+Float_t MET_covXX;
+Float_t MET_covXY;
+Float_t MET_covYY;
+Float_t MET_significance;
+Float_t GenMET_pt;
+
+Float_t PV_chi2;
+Float_t PV_score;
+Float_t PV_x;
+Float_t PV_y;
+Float_t PV_z;
+
+const int nLeptons_max = 100;
+
+UInt_t nElectron;
+Int_t Electron_charge[nLeptons_max];
+Float_t Electron_dxy[nLeptons_max];
+Float_t Electron_dz[nLeptons_max];
+Float_t Electron_eta[nLeptons_max];
+Float_t Electron_mass[nLeptons_max];
+Float_t Electron_phi[nLeptons_max];
+Float_t Electron_pt[nLeptons_max];
+
+UInt_t nMuon;
+Int_t Muon_charge[nLeptons_max];
+Float_t Muon_dxy[nLeptons_max];
+Float_t Muon_dz[nLeptons_max];
+Float_t Muon_eta[nLeptons_max];
+Float_t Muon_mass[nLeptons_max];
+Float_t Muon_phi[nLeptons_max];
+Float_t Muon_pt[nLeptons_max];
+
+/**
+ * @brief Defines output global variables.
+ * Defines separately first and second lepton.
+ */
+Int_t Electron_charge_st, Electron_charge_nd;
+Float_t Electron_dxy_st, Electron_dxy_nd;
+Float_t Electron_dz_st, Electron_dz_nd;
+Float_t Electron_eta_st, Electron_eta_nd;
+Float_t Electron_mass_st, Electron_mass_nd;
+Float_t Electron_phi_st, Electron_phi_nd;
+Float_t Electron_pt_st, Electron_pt_nd;
+    
+Int_t Muon_charge_st, Muon_charge_nd;
+Float_t Muon_dxy_st, Muon_dxy_nd;
+Float_t Muon_dz_st, Muon_dz_nd;
+Float_t Muon_eta_st, Muon_eta_nd;
+Float_t Muon_mass_st, Muon_mass_nd;
+Float_t Muon_phi_st, Muon_phi_nd;
+Float_t Muon_pt_st, Muon_pt_nd;
+
+/**
+ * @brief Helper functions for the for loop in the main,
+ * used to turn lists into single value variables.
+ */
+void electron_variables(int idx, bool isFirst) {
+    if (isFirst) {
+        Electron_charge_st = Electron_charge[idx];
+        Electron_dxy_st = Electron_dxy[idx];
+        Electron_dz_st = Electron_dz[idx];
+        Electron_eta_st = Electron_eta[idx];
+        Electron_mass_st = Electron_mass[idx];
+        Electron_phi_st = Electron_phi[idx];
+        Electron_pt_st = Electron_pt[idx];
+    } else {
+        Electron_charge_nd = Electron_charge[idx];
+        Electron_dxy_nd = Electron_dxy[idx];
+        Electron_dz_nd = Electron_dz[idx];
+        Electron_eta_nd = Electron_eta[idx];
+        Electron_mass_nd = Electron_mass[idx];
+        Electron_phi_nd = Electron_phi[idx];
+        Electron_pt_nd = Electron_pt[idx];
+    }
+}
+
+void muon_variables(int idx, bool isFirst) {
+    if (isFirst) {
+        Muon_charge_st = Muon_charge[idx];
+        Muon_dxy_st = Muon_dxy[idx];
+        Muon_dz_st = Muon_dz[idx];
+        Muon_eta_st = Muon_eta[idx];
+        Muon_mass_st = Muon_mass[idx];
+        Muon_phi_st = Muon_phi[idx];
+        Muon_pt_st = Muon_pt[idx];
+    } else {
+        Muon_charge_nd = Muon_charge[idx];
+        Muon_dxy_nd = Muon_dxy[idx];
+        Muon_dz_nd = Muon_dz[idx];
+        Muon_eta_nd = Muon_eta[idx];
+        Muon_mass_nd = Muon_mass[idx];
+        Muon_phi_nd = Muon_phi[idx];
+        Muon_pt_nd = Muon_pt[idx];
+    }
+}
+
+void empty_electron_variables() {
+    Electron_charge_st = 0; Electron_charge_nd = 0;
+    Electron_dxy_st = 0; Electron_dxy_nd = 0;
+    Electron_dz_st = 0; Electron_dz_nd = 0;
+    Electron_eta_st = 0; Electron_eta_nd = 0;
+    Electron_mass_st = 0; Electron_mass_nd = 0;
+    Electron_phi_st = 0; Electron_phi_nd = 0;
+    Electron_pt_st = 0; Electron_pt_nd = 0;
+}
+
+void empty_muon_variables() {
+    Muon_charge_st = 0; Muon_charge_nd = 0;
+    Muon_dxy_st = 0; Muon_dxy_nd = 0;
+    Muon_dz_st = 0; Muon_dz_nd = 0;
+    Muon_eta_st = 0; Muon_eta_nd = 0;
+    Muon_mass_st = 0; Muon_mass_nd = 0;
+    Muon_phi_st = 0; Muon_phi_nd = 0;
+    Muon_pt_st = 0; Muon_pt_nd = 0;
+}
+
+
+
+/**
+ * @brief Main.
+ */
+void skimming_ZZTo2L2Nu() {
+    /**
+     * @brief Selects the TTree 'Events' from CMS Open Data file.
+     */
+    auto chain = std::make_unique<TChain>("Events");
+
+    chain->Add("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
+
+    /**
+     * @brief Sets all branch statuses to zero.
+     */
+    chain->SetBranchStatus("*", 0);
+    
+    /**
+     * @brief Selects the previous branches, setting their
+     * status to one.
+     */
+    chain->SetBranchStatus("MET_pt", 1);
+    chain->SetBranchStatus("MET_phi", 1);
+    chain->SetBranchStatus("MET_covXX", 1);
+    chain->SetBranchStatus("MET_covXY", 1);
+    chain->SetBranchStatus("MET_covYY", 1);
+    chain->SetBranchStatus("MET_significance", 1);
+    chain->SetBranchStatus("GenMET_pt", 1);
+
+    chain->SetBranchStatus("PV_chi2", 1);
+    chain->SetBranchStatus("PV_score", 1);
+    chain->SetBranchStatus("PV_x", 1);
+    chain->SetBranchStatus("PV_y", 1);
+    chain->SetBranchStatus("PV_z", 1);
+
+    chain->SetBranchStatus("nElectron", 1);
+    chain->SetBranchStatus("Electron_charge", 1);
+    chain->SetBranchStatus("Electron_dxy", 1);
+    chain->SetBranchStatus("Electron_dz", 1);
+    chain->SetBranchStatus("Electron_eta", 1);
+    chain->SetBranchStatus("Electron_mass", 1);
+    chain->SetBranchStatus("Electron_phi", 1);
+    chain->SetBranchStatus("Electron_pt", 1);
+
+    chain->SetBranchStatus("nMuon", 1);
+    chain->SetBranchStatus("Muon_charge", 1);
+    chain->SetBranchStatus("Muon_dxy", 1);
+    chain->SetBranchStatus("Muon_dz", 1);
+    chain->SetBranchStatus("Muon_eta", 1);
+    chain->SetBranchStatus("Muon_mass", 1);
+    chain->SetBranchStatus("Muon_phi", 1);
+    chain->SetBranchStatus("Muon_pt", 1);
+
+    /**
+     * @brief Gets the address of the selected branches to copy
+     * their values inside the new file.
+     **/
+    chain->SetBranchAddress("MET_pt", &MET_pt);
+    chain->SetBranchAddress("MET_phi", &MET_phi);
+    chain->SetBranchAddress("MET_covXX", &MET_covXX);
+    chain->SetBranchAddress("MET_covXY", &MET_covXY);
+    chain->SetBranchAddress("MET_covYY", &MET_covYY);
+    chain->SetBranchAddress("MET_significance", &MET_significance);
+    chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
+
+    chain->SetBranchAddress("PV_chi2", &PV_chi2);
+    chain->SetBranchAddress("PV_score", &PV_score);
+    chain->SetBranchAddress("PV_x", &PV_x);
+    chain->SetBranchAddress("PV_y", &PV_y);
+    chain->SetBranchAddress("PV_z", &PV_z);
+
+    chain->SetBranchAddress("nElectron", &nElectron);
+    chain->SetBranchAddress("Electron_charge", &Electron_charge);
+    chain->SetBranchAddress("Electron_dxy", &Electron_dxy);
+    chain->SetBranchAddress("Electron_dz", &Electron_dz);
+    chain->SetBranchAddress("Electron_eta", &Electron_eta);
+    chain->SetBranchAddress("Electron_mass", &Electron_mass);
+    chain->SetBranchAddress("Electron_phi", &Electron_phi);
+    chain->SetBranchAddress("Electron_pt", &Electron_pt);
+
+    chain->SetBranchAddress("nMuon", &nMuon);
+    chain->SetBranchAddress("Muon_charge", &Muon_charge);
+    chain->SetBranchAddress("Muon_dxy", &Muon_dxy);
+    chain->SetBranchAddress("Muon_dz", &Muon_dz);
+    chain->SetBranchAddress("Muon_eta", &Muon_eta);
+    chain->SetBranchAddress("Muon_mass", &Muon_mass);
+    chain->SetBranchAddress("Muon_phi", &Muon_phi);
+    chain->SetBranchAddress("Muon_pt", &Muon_pt);
+
+    /**
+     * @brief Clone full TTree structure (not the content).
+     */
+    TTree *newtree = chain->CloneTree(0);
+
+    /**
+     * @param n_events Number of events in each file
+     */
+    Long64_t n_events = chain->GetEntries();
+
+    std::cout << "nEvents before skimming:" << n_events << std::endl;
+
+    /**
+     * @brief Calculate mean and standard deviation of GenMET
+     * to later perform a statistical cut on outliers.
+     */
+    Float_t sum = 0.0;
+    Float_t sum2 = 0.0;
+    Long64_t count = 0;
+
+    for (Long64_t i = 0; i < n_events; ++i) {
+        chain->GetEntry(i);
+        sum += GenMET_pt;
+        count++;
+    }
+
+    Float_t GenMET_mean = sum / count;
+    Float_t GenMET_variance_num = 0.0;
+
+    for (Long64_t i = 0; i < n_events; ++i) {
+        chain->GetEntry(i);
+        GenMET_variance_num += (GenMET_pt - GenMET_mean)*(GenMET_pt - GenMET_mean);
+    }
+
+    Float_t GenMET_variance = GenMET_variance_num / count;
+    Float_t GenMET_std = std::sqrt(GenMET_variance);
+
+    std::cout << "Mean GenMET_pt: " << GenMET_mean << std::endl;
+    std::cout << "Standard deviation GenMET_pt: " << GenMET_std << std::endl;
+
+    /**
+     * @brief Takes only events with two electrons or/and two muons
+     * and increases the event counter.
+     */
+
+    // First electron
+    newtree->Branch("Electron_charge_st", &Electron_charge_st);
+    newtree->Branch("Electron_dxy_st", &Electron_dxy_st);
+    newtree->Branch("Electron_dz_st", &Electron_dz_st);
+    newtree->Branch("Electron_eta_st", &Electron_eta_st);
+    newtree->Branch("Electron_mass_st", &Electron_mass_st);
+    newtree->Branch("Electron_phi_st", &Electron_phi_st);
+    newtree->Branch("Electron_pt_st", &Electron_pt_st);
+
+    // Second electron
+    newtree->Branch("Electron_charge_nd", &Electron_charge_nd);
+    newtree->Branch("Electron_dxy_nd", &Electron_dxy_nd);
+    newtree->Branch("Electron_dz_nd", &Electron_dz_nd);
+    newtree->Branch("Electron_eta_nd", &Electron_eta_nd);
+    newtree->Branch("Electron_mass_nd", &Electron_mass_nd);
+    newtree->Branch("Electron_phi_nd", &Electron_phi_nd);
+    newtree->Branch("Electron_pt_nd", &Electron_pt_nd);
+
+    // First muon
+    newtree->Branch("Muon_charge_st", &Muon_charge_st);
+    newtree->Branch("Muon_dxy_st", &Muon_dxy_st);
+    newtree->Branch("Muon_dz_st", &Muon_dz_st);
+    newtree->Branch("Muon_eta_st", &Muon_eta_st);
+    newtree->Branch("Muon_mass_st", &Muon_mass_st);
+    newtree->Branch("Muon_phi_st", &Muon_phi_st);
+    newtree->Branch("Muon_pt_st", &Muon_pt_st);
+    
+    newtree->Branch("Muon_charge_nd", &Muon_charge_nd);
+    newtree->Branch("Muon_dxy_nd", &Muon_dxy_nd);
+    newtree->Branch("Muon_dz_nd", &Muon_dz_nd);
+    newtree->Branch("Muon_eta_nd", &Muon_eta_nd);
+    newtree->Branch("Muon_mass_nd", &Muon_mass_nd);
+    newtree->Branch("Muon_phi_nd", &Muon_phi_nd);
+    newtree->Branch("Muon_pt_nd", &Muon_pt_nd);
+    
+    Long64_t n_events_skimmed = 0;
+
+    for (Long64_t i = 0; i < n_events; i++) {
+        chain->GetEntry(i);
+        
+        if (nElectron==2 && nMuon==0) {
+            electron_variables(0, true);  // first electron
+            electron_variables(1, false);  // second electron
+
+            empty_muon_variables();
+
+        // Fill Tree with new entries
+        newtree->Fill();
+        // Keep tracFillk of events
+        n_events_skimmed++;
+        }
+        else if (nMuon==2 && nElectron==0) {
+            muon_variables(0, true);
+            muon_variables(1, false);
+
+            empty_electron_variables();
+
+        newtree->Fill();
+        n_events_skimmed++;
+        }
+        else if (nElectron==2 && nMuon==2) {
+            electron_variables(0, true);
+            electron_variables(1, false);
+
+            muon_variables(0, true);
+            muon_variables(1, false);
+
+        newtree->Fill();
+        n_events_skimmed++;
+        }
+    }
+
+    /**
+     * @brief Number of events remaining after the skimming.
+     */
+    std::cout << "Remaining events after skimming: " << n_events_skimmed << std::endl;
+
+    /**
+     * @brief Creates blank new file to collect skimmed data.
+     * If already existent, it recreates it.
+     * 
+     */
+    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/specific_skimmed_ZZTo2L2Nu.root", "RECREATE");
+
+    /**
+     * @brief Writes the new tree than closes the new file.
+     */
+    newtree->Write();
+    skimfile->Close();
+}
+

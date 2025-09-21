@@ -1,3 +1,7 @@
+/**
+ * @file skimming_flags.C
+ * @brief Only skims the dataset's flag entries for a better readability.
+ */
 #include <TTree.h>
 #include <TChain.h>
 #include <TFile.h>
@@ -8,7 +12,9 @@ void skimming_flags() {
      * @brief Selects the TTree 'Events' from CMS Open Data file.
      */
     auto chain = std::make_unique<TChain>("Events");
-    chain->Add("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");  // dataset 0
+    //chain->Add("../datasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");
+    //chain->Add("../datasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
+    //chain->Add("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
 
     /**
      * @brief Reads all branches names

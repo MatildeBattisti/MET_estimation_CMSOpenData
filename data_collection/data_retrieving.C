@@ -1,3 +1,9 @@
+/**
+ * @file data_retrieving.C
+ * @brief Opens .root files and reads the branches inside the
+ * "Events" tree.
+ * Also shows the number of events and branches for each event.
+ */
 #include <iostream>
 #include <TFile.h>
 #include <TTree.h>
@@ -7,13 +13,17 @@ void data_retrieving() {
      * @brief Open file from local path.
      * Returns an error if file is not opened.
      */
-    //TFile *file = TFile::Open("../datasets//HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");  // dataset 0
-    //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/DB4AFAC8-16AD-AB48-82D2-1E9DAE8AB314.root");  // dataset 1
-    //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/77DB0F5B-4123-4E4B-A9D0-3CEBA8575834.root");  // dataset 2
-    //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/048A040C-DA63-1949-9BA7-075371EB4296.root");  // dataset 3
-
-    TFile *file = TFile::Open("../datasets/ZZZ/2E96A5E9-C938-A149-BBBF-8FD81A9E5AD6.root");
+    //TFile *file = TFile::Open("../datasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");
     //TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZZ.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_ZZZ.root");
+    
+    //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/skimmed_HToAATo2Mu2B.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_HToAATo2Mu2B.root");
+    
+    //TFile *file = TFile::Open("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
+    TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZTo2L2Nu.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_ZZTo2L2Nu.root");
 
     if (!file || file->IsZombie()) {
         std::cerr << "Error opening file." << std::endl;
@@ -21,6 +31,8 @@ void data_retrieving() {
      }
     file->ls();
     
+
+
     /**
      * @brief Get 'Events' tree entries.
      * If Show() is left empty, shows EVENT:-1. We only use it to see the entries name.
@@ -34,8 +46,19 @@ void data_retrieving() {
         exit(-1);
     }
 
-    //event->Print();
-    event->Show(1);
+    event->Show(2);
+
+
+
+    /**
+     * @brief Calculates the number of events.
+     */
+    TTree *tree = (TTree*)file->Get("Events");
+    Long64_t n_events = tree->GetEntries();
+
+    std::cout << "nEvents:" << n_events << std::endl;
+
+
 
     /**
      * @brief Gets number of branches inside the 'Events' TTree.
@@ -43,8 +66,11 @@ void data_retrieving() {
     int nBranches = event->GetListOfBranches()->GetEntries();
     std::cout << "Number of branches in Events: " << nBranches << std::endl;
 
+
+
     /**
      * @brief Closes file.
      */
     file->Close();
 }
+
