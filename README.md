@@ -1,45 +1,39 @@
-# cmepda_project
-The aim of this project is to implement a machine learning algorithm to improve the Missing Energy (MET) resolution in LHC experiments using CERN Open Data.
+# CMS Open Data Analysis: MET Estimation with Machine Learning
 
-## Requirements
-To run this code you may need to install the following packages.
+## Introduction
 
-```bash
-pip install xgboost
-pip install uproot
-```
+This project explores the application of machine learning techniques to analyze CMS experimental data from CERN Open Data. The primary objective is to evaluate and compare Missing Transverse Energy (MET) estimation across different physics processes using two well-established ML models:
+- **XGBoost**: a gradient boosting framework optimized for structured data;
+- **Keras**: a high-level neural networks API for deep learning applications.
 
-Alternatively, since we are not using an NVIDIA GPU you can install the lighter xgboost package. This is not recommended since some functionalities may not work.
+### Datasets
 
-```bash
-pip install xgboost-cpu
-```
+The project examines three distinct CMS datasets from CERN Open Data, each representing different physics processes:
+1. **ZZZ**: triple Z boson production;
+2. **HToAATo2Mu2B**: Higgs to pseudoscalar pairs decay;
+3. **ZZTo2L2Nu**: Z boson pair production with leptonic decay.
 
-## Exploring the dataset
-In the data_retrieving.C file we read the Open Data .root file, particularly exploring the branches inside the 'Event' TTree. This is useful to decide the entries to keep in order to pass them as parameters of the ML algorithm.
-On this note data_skimming.C only keeps MET and Jet entries, excluding trigger and flag bits.
+You can find the specific datasets that I used here:
+- **ZZZ** -> https://opendata.cern.ch/record/75600 -> 47348ED1-E550-CF48-9E94-BED2742AB141.root
+- **HToAATo2Mu2B** -> https://opendata.cern.ch/record/41341 -> 6357E7BC-502C-2E45-A649-73A57B651715.root
+- **ZZTo2L2Nu** -> https://opendata.cern.ch/record/75567 -> 0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root
 
-## The Machine Learning algorithm
-The MET resolution is improved through a ML regression algorithm, using XGBoost packages.
-The aim of this project is to implement a machine learning algorithm to improve the Missing Energy (MET) resolution in LHC experiments using CERN Open Data.
+### The analysis
 
-## Requirements
-To run this code you may need to install the following packages.
+The analysis follows a two-phase approach:
 
-'''bash
-pip install xgboost
-pip install uproot
-'''
+**Common Parameter Analysis**
+Initially, only relevant parameters common to all three datasets are fed to the ML models. This ensures a fair comparison across different physics processes and establishes a baseline for MET estimation performance.
 
-Alternatively, since we are not using an NVIDIA GPU you can install the lighter xgboost package. This is not recommended since some functionalities may not work.
+**Dataset-Specific Skimming**
+In the second phase, dataset-specific feature selection and skimming are performed for each physics process. This targeted approach allows us to:
+- optimize feature sets for each specific physics signature;
+- investigate how dataset-specific variables influence MET estimation;
+- compare the improvement in MET reconstruction accuracy when using process-optimized features.
 
-'''bash
-pip install xgboost-cpu
-'''
+### Goals
 
-## Exploring the dataset
-In the data_retrieving.C file we read the Open Data .root file, particularly exploring the branches inside the 'Event' TTree.
-This will be useful to decide what entries are not useful to pass as parameters of the ML algorithm, such as flag and trigger bits.
-data_skimming.C gets rid of such uniteresting branches.
-
-## Machine Learning alorithm
+The goals for this analysis are:
+- evaluate the performance of XGBoost vs. Keras models for MET estimation;
+- quantify the impact of dataset-specific feature engineering on model accuracy;
+- demonstrate reproducible machine learning workflows with CERN Open Data.

@@ -13,7 +13,6 @@ std::pair<size_t, size_t> findTwoMaxIndices(const Float_t* arr, size_t n) {
     size_t maxIdx = 0;
     size_t secondMaxIdx = 1;
 
-    // inizializzazione: assicuriamoci che maxIdx punti al massimo iniziale
     if (arr[secondMaxIdx] > arr[maxIdx]) {
         std::swap(maxIdx, secondMaxIdx);
     }

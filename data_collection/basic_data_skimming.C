@@ -16,9 +16,9 @@ void basic_data_skimming() {
     auto chain = std::make_unique<TChain>("Events");
     //chain->Add("../datasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");  // ZZZ
 
-    //chain->Add("../datasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");  // HToAATo2Mu2B
+    chain->Add("../datasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");  // HToAATo2Mu2B
    
-    chain->Add("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");  // ZZTo2L2Nu
+    //chain->Add("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");  // ZZTo2L2Nu
 
 
 
@@ -154,7 +154,7 @@ void basic_data_skimming() {
      * If already existent, it recreates it.
      * 
      */
-    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_ZZTo2L2Nu.root", "RECREATE");
+    auto skimfile = std::make_unique<TFile>("../skimmed_datasets/skimmed_HToAATo2Mu2B.root", "RECREATE");
 
 
 
