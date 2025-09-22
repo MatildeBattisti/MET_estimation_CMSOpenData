@@ -39,3 +39,13 @@ The goals for this analysis are:
 - evaluate the performance of XGBoost vs. Keras models for MET estimation;
 - quantify the impact of dataset-specific feature engineering on model accuracy;
 - demonstrate reproducible machine learning workflows with CERN Open Data.
+
+## Requirements
+
+To run the code in this repository, a working installation of **ROOT** is required. You can follow the official installation guide here: [ROOT Installation](https://root.cern/install/).
+
+Once ROOT is installed, you can install all the required Python packages by running:
+
+```bash
+pip install -r requirements.txt
+```

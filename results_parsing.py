@@ -3,6 +3,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 """
+    Statistics to evaluate the goodness of the model
+"""
+skimmed_stats = pd.read_csv("results/ZZTo2L2Nu_results/skimmed/summary_stats.csv")
+stats_dict = skimmed_stats.iloc[0].to_dict()
+print("Stats for the dataset skimmed with generic entries:")
+for key, value in stats_dict.items():
+    print(f"{key}: {value}")
+
+skimmed_stats_specific = pd.read_csv("results/ZZTo2L2Nu_results/specific_skimmed/summary_stats.csv")
+stats_dict_specific = skimmed_stats_specific.iloc[0].to_dict()
+print("\nStats for the dataset skimmed with specific entries:")
+for key, value in stats_dict_specific.items():
+    print(f"{key}: {value}")
+
+"""
     Heatmap for Pearson correlations
 """
 pearson_corr = pd.read_csv("results/ZZTo2L2Nu_results/skimmed/pearson_corr.csv", index_col=0)
@@ -62,8 +77,8 @@ axes[0].scatter(skimmed_MET["GenMET_pt"], skimmed_MET["MET_pt"], alpha=0.3, colo
 axes[0].plot([skimmed_MET["GenMET_pt"].min(), skimmed_MET["GenMET_pt"].max()],
              [skimmed_MET["GenMET_pt"].min(), skimmed_MET["GenMET_pt"].max()],
              'r--', lw=1)
-axes[0].set_xlabel("GenMET_pt")
-axes[0].set_ylabel("MET_pt")
+axes[0].set_xlabel("GenMET_pt [GeV]")
+axes[0].set_ylabel("MET_pt [GeV]")
 axes[0].set_title("Dataset skimmed with generic features")
 
 # Specific skimmed
@@ -71,7 +86,7 @@ axes[1].scatter(specific_skimmed_MET["GenMET_pt"], specific_skimmed_MET["MET_pt"
 axes[1].plot([specific_skimmed_MET["GenMET_pt"].min(), specific_skimmed_MET["GenMET_pt"].max()],
              [specific_skimmed_MET["GenMET_pt"].min(), specific_skimmed_MET["GenMET_pt"].max()],
              'r--', lw=1)
-axes[1].set_xlabel("GenMET_pt")
+axes[1].set_xlabel("GenMET_pt [GeV]")
 axes[1].set_title("Dataset skimmed with specifcally chosen features")
 
 plt.suptitle("GenMET vs MET")
@@ -91,8 +106,8 @@ axes[0].scatter(scatter_test["y_test"], scatter_test["y_test_pred"], alpha=0.3, 
 axes[0].plot([scatter_test["y_test"].min(), scatter_test["y_test"].max()],
              [scatter_test["y_test"].min(), scatter_test["y_test"].max()],
              'r--', lw=1)
-axes[0].set_xlabel("GenMET_pt [Gev]")
-axes[0].set_ylabel("Predicted MET [Gev]")
+axes[0].set_xlabel("GenMET_pt [GeV]")
+axes[0].set_ylabel("Predicted MET [GeV]")
 axes[0].set_title("Dataset skimmed with generic features")
 
 # Specific skimmed
@@ -100,27 +115,13 @@ axes[1].scatter(scatter_test_specific["y_test"], scatter_test_specific["y_test_p
 axes[1].plot([scatter_test_specific["y_test"].min(), scatter_test_specific["y_test"].max()],
              [scatter_test_specific["y_test"].min(), scatter_test_specific["y_test"].max()],
              'r--', lw=1)
-axes[1].set_xlabel("GenMET_pt [Gev]")
+axes[1].set_xlabel("GenMET_pt [GeV]")
 axes[1].set_title("Dataset skimmed with specifcally chosen features")
 
 plt.suptitle("GenMET vs PredictedMET")
 plt.tight_layout()
 plt.show()
 
-"""
-    Statistics to evaluate the goodness of the model
-"""
-skimmed_stats = pd.read_csv("results/ZZTo2L2Nu_results/skimmed/summary_stats.csv")
-stats_dict = skimmed_stats.iloc[0].to_dict()
-print("Stats for the dataset skimmed with generic entries:")
-for key, value in stats_dict.items():
-    print(f"{key}: {value}")
-
-skimmed_stats_specific = pd.read_csv("results/ZZTo2L2Nu_results/specific_skimmed/summary_stats.csv")
-stats_dict_specific = skimmed_stats_specific.iloc[0].to_dict()
-print("\nStats for the dataset skimmed with specific entries:")
-for key, value in stats_dict_specific.items():
-    print(f"{key}: {value}")
 
 
 
