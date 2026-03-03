@@ -10,4 +10,4 @@ datasets/
 skimmed_datasets/
 
 # Typst files for documentation
-*.typ
+*.typvenv/

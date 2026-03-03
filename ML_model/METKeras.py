@@ -8,11 +8,12 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from scipy.stats import pearsonr, spearmanr
 import numpy as np
+import pandas as pd
 from itertools import product
+import os
+import re
 import uproot
 import time
-
-import matplotlib.pyplot as plt
 
 
 
@@ -20,41 +21,171 @@ import matplotlib.pyplot as plt
     Opens ROOT file and selects desired branches.
     Extracts them with uproot method .arrays().
 """
-def read_data():
-    file = uproot.open("../skimmed_datasets/skimmed_ZZTo2L2Nu_0.root")
+def read_data(file_path: str):
+    file = uproot.open(file_path)
     tree = file["Events"]
 
-    branches = [
+    filename = os.path.basename(file_path)
+
+    # Dictionary with specific branches
+    branch_map = {
+        "ZZZ": [
+            "MET_pt",
+            "MET_phi",
+            "MET_covXX",
+            "MET_covXY",
+            "MET_covYY",
+            "MET_significance",
+            "PV_chi2",
+            "PV_score",
+            "PV_x",
+            "PV_y",
+            "PV_z",
+            "nSV",
+            "SV_charge_st",
+            "SV_chi2_st",
+            "SV_dxy_st",
+            "SV_pAngle_st",
+            "Jet_area_st",
+            "Jet_eta_st",
+            "Jet_mass_st",
+            "Jet_phi_st",
+            "Jet_pt_st",
+            "Jet_btag_st",
+            "Jet_area_nd",
+            "Jet_eta_nd",
+            "Jet_mass_nd",
+            "Jet_phi_nd",
+            "Jet_pt_nd",
+            "Jet_btag_nd",
+            "GenMET_pt"
+        ],
+        "HToAATo2MU2B": [
+            "MET_pt",
+            "MET_phi",
+            "MET_covXX",
+            "MET_covXY",
+            "MET_covYY",
+            "MET_significance",
+            "PV_chi2",
+            "PV_score",
+            "PV_x",
+            "PV_y",
+            "PV_z",
+            "nSV",
+            "nJet",
+            "nMuon",
+            "Jet_eta_bst",
+            "Jet_eta_bnd",
+            "Jet_pt_bst",
+            "Jet_pt_bnd",
+            "Jet_phi_bst",
+            "Jet_phi_bnd",
+            "Jet_mass_bst",
+            "Jet_mass_bnd",
+            "Jet_area_bst",
+            "Jet_area_bnd",
+            "Jet_btag_bst",
+            "Jet_btag_bnd",
+            "Muon_charge_st",
+            "Muon_charge_nd",
+            "Muon_dxy_st",
+            "Muon_dxy_nd",
+            "Muon_dz_st",
+            "Muon_dz_nd",
+            "Muon_eta_st",
+            "Muon_eta_nd",
+            "Muon_mass_st",
+            "Muon_mass_nd",
+            "Muon_phi_st",
+            "Muon_phi_nd",
+            "Muon_pt_st",
+            "Muon_pt_nd",
+            "GenMET_pt"
+        ],
+        "ZZTo2L2Nu": [
+            "MET_pt",
+            "MET_phi",
+            "MET_covXX",
+            "MET_covXY",
+            "MET_covYY",
+            "MET_significance",
+            "PV_chi2",
+            "PV_score",
+            "PV_x",
+            "PV_y",
+            "PV_z",
+            "nElectron",
+            "Electron_charge_st",
+            "Electron_charge_nd",
+            "Electron_dxy_st",
+            "Electron_dxy_nd",
+            "Electron_dz_st",
+            "Electron_dz_nd",
+            "Electron_eta_st",
+            "Electron_eta_nd",
+            "Electron_mass_st",
+            "Electron_mass_nd",
+            "Electron_phi_st",
+            "Electron_phi_nd",
+            "Electron_pt_st",
+            "Electron_pt_nd",
+            "nMuon",
+            "Muon_charge_st",
+            "Muon_charge_nd",
+            "Muon_dxy_st",
+            "Muon_dxy_nd",
+            "Muon_dz_st",
+            "Muon_dz_nd",
+            "Muon_eta_st",
+            "Muon_eta_nd",
+            "Muon_mass_st",
+            "Muon_mass_nd",
+            "Muon_phi_st",
+            "Muon_phi_nd",
+            "Muon_pt_st",
+            "Muon_pt_nd",
+            "GenMET_pt"
+        ], 
+    }
+
+    # Default skimming branches
+    default_branches = [
         "nJet",
-        "Jet_area_st",
-        "Jet_eta_st",
-        "Jet_pt_st",
-        "Jet_phi_st",
-        "Jet_mass_st",
-        "Jet_area_nd",
-        "Jet_eta_nd",
-        "Jet_pt_nd",
-        "Jet_phi_nd",
-        "Jet_mass_nd",
-        "Jet_area_rd",
-        "Jet_eta_rd",
-        "Jet_pt_rd",
-        "Jet_phi_rd",
-        "Jet_mass_rd",
         "MET_pt",
         "MET_phi",
         "MET_significance",
         "MET_covXX",
         "MET_covXY",
         "MET_covYY",
+        "PV_chi2",
+        "PV_score",
+        "PV_x",
+        "PV_y",
+        "PV_z",
+        "nSV",
         "GenMET_pt"
     ]
 
+    # Automatic branch selection depending on the file name
+    if filename.startswith("specific_skimmed_"):
+        match = re.match(r"specific_skimmed_(.+)\.root", filename)
+        if match:
+            event = match.group(1)
+            if event in branch_map:
+                branches = branch_map[event]
+                print(f"✅ Loaded dataset '{event}'.")
+            else:
+                raise ValueError(f"⚠️ No specific configuration for '{event}'.")
+        else:
+            raise ValueError("❌ File name not recognised.")
+    elif filename.startswith("skimmed_"):
+        branches = default_branches
+        print(f"✅ Loaded dataset '{filename}' with default branches.")
+    else:
+        raise ValueError(f"❌ Filename '{filename}' doesn't wollow the expected configuration.")
+
     data = tree.arrays(branches, library="np")
-
-    #Insert check for np arrays
-
-    print(f'✅ Read data from .root file')
     return branches, data
 
 
@@ -62,35 +193,14 @@ def read_data():
 """
     Data parsing to work with Keras.
 """
-def data_parsing(data):
-    features = np.array([
-        data["nJet"],
-        data["Jet_area_st"],
-        data["Jet_eta_st"],
-        data["Jet_pt_st"],
-        data["Jet_phi_st"],
-        data["Jet_mass_st"],
-        data["Jet_area_nd"],
-        data["Jet_eta_nd"],
-        data["Jet_pt_nd"],
-        data["Jet_phi_nd"],
-        data["Jet_mass_nd"],
-        data["Jet_area_rd"],
-        data["Jet_eta_rd"],
-        data["Jet_pt_rd"],
-        data["Jet_phi_rd"],
-        data["Jet_mass_rd"],
-        data["MET_pt"],
-        data["MET_phi"],
-        data["MET_significance"],
-        data["MET_covXX"],
-        data["MET_covXY"],
-        data["MET_covYY"]
-    ]).T
+def data_parsing(branches, data):
+    feature_names = [b for b in branches if b != "GenMET_pt"]
+
+    features = np.column_stack([data[name] for name in feature_names])
 
     target = data["GenMET_pt"]
 
-    print(f'✅ Shape of features and target:')
+    print(f"✅ Shape of features and target:")
     print(f"(N events, N features): {features.shape}")
     print(f"(N events, N target): {target.shape}")
     return features, target
@@ -102,6 +212,17 @@ def data_parsing(data):
     Evaluates target's data for later analysis.
 """
 def data_analysis(branches, features, target):
+    # Using pandas
+    df = pd.DataFrame(features, columns=branches[:-1])
+    df["GenMET_pt"] = target
+
+    # Pearson
+    pearson_corr = df.corr(method='pearson')
+    pearson_corr.to_csv("../results/results_Keras/ZZTo2L2Nu/skimmed/pearson_corr.csv")
+
+    # Spearman
+    spearman_corr = df.corr(method='spearman')
+    spearman_corr.to_csv("../results/results_Keras/ZZTo2L2Nu/skimmed/spearman_corr.csv")
 
     # Pearson correlation
     Pcorrs = []
@@ -232,7 +353,7 @@ def search_best_model(features, target):
                 batch_size=params['batch_size'],
                 epochs=100,
                 validation_data=(x_val, y_val),
-                verbose=0,  # cambiare a 1
+                verbose=0,
                 callbacks=[early_stop]
             )
 
@@ -290,7 +411,7 @@ def testing(X_train, y_train, X_test_scaled, best_params):
         batch_size=best_params['batch_size'],
         epochs=100,
         validation_data=(X_val_scaled, y_val),
-        verbose=0,  # cambiare a 1
+        verbose=1,
         callbacks=[early_stop]
     )
 
@@ -305,16 +426,34 @@ def testing(X_train, y_train, X_test_scaled, best_params):
 """
     Evaluates the prediction made by the model over the test set.
 """
-def results_evaluation(y_test, y_test_pred):
-    rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-    mae = mean_absolute_error(y_test, y_test_pred)
-    r2 = r2_score(y_test, y_test_pred)
+def results_evaluation(data, y_test, y_test_pred):
+    MET_pt = data["MET_pt"]
+    GenMET_pt = data["GenMET_pt"]
+
+    original_rmse = np.sqrt(mean_squared_error(MET_pt, GenMET_pt))
+    original_mae = mean_absolute_error(MET_pt, GenMET_pt)
+    original_r2 = r2_score(MET_pt, GenMET_pt)
+
+    predicted_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+    predicted_mae = mean_absolute_error(y_test, y_test_pred)
+    predicted_r2 = r2_score(y_test, y_test_pred)
+
+    stats = {
+        "RMSE_GenMET_vs_MET_pt": original_rmse,
+        "MAE_GenMET_vs_MET_pt": original_mae,
+        "R2_GenMET_vs_MET_pt": original_r2,
+        "RMSE_GenMET_vs_Prediction": predicted_rmse,
+        "MAE_GenMET_vs_Prediction": predicted_mae,
+        "R2_GenMET_vs_Prediction": predicted_r2
+    }
+
+    pd.DataFrame([stats]).to_csv("../results/results_Keras/ZZTo2L2Nu/skimmed/summary_stats.csv", index=False)
 
     print(f"✅ Evaluation metrics for the model:")
-    print(f"Target-Prediction RMSE: {rmse}")
-    print(f"Target-Prediction MAE: {mae}")
-    print(f"Target-Prediction R²: {r2}")
-    return rmse, mae, r2
+    print(f"Target-Prediction RMSE: {predicted_rmse}")
+    print(f"Target-Prediction MAE: {predicted_mae}")
+    print(f"Target-Prediction R²: {predicted_r2}")
+    return
 
 
 
@@ -322,9 +461,9 @@ def results_evaluation(y_test, y_test_pred):
     Main. Executing all functions and plot relevant things.
 """
 if __name__ == '__main__':
-    branches, data = read_data()
+    branches, data = read_data("../skimmed_datasets/skimmed_ZZTo2L2Nu.root")
 
-    features, target = data_parsing(data)
+    features, target = data_parsing(branches, data)
 
     data_analysis(branches, features, target)
 
@@ -332,18 +471,18 @@ if __name__ == '__main__':
 
     y_test_pred = testing(X_train, y_train, X_test_scaled, best_params)
 
-    rmse, mae, r2 = results_evaluation(y_test, y_test_pred)
+    results_evaluation(data, y_test, y_test_pred)
 
-    plt.figure(figsize=(8, 6))
-    plt.scatter(y_test, y_test_pred, color='blue', alpha=0.6)
+    # Save in files
+    scatter_MET = pd.DataFrame({
+        "MET_pt": data["MET_pt"],
+        "GenMET_pt": target
+    })
+    scatter_MET.to_json("../results/results_Keras/ZZTo2L2Nu/skimmed/MET_vs_GenMET.json", orient="records")
 
-    min_val = min(y_test.min(), y_test_pred.min())
-    max_val = max(y_test.max(), y_test_pred.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='y = x')
+    scatter_test = pd.DataFrame({
+        "y_test": y_test,
+        "y_test_pred": y_test_pred
+    })
+    scatter_test.to_json("../results/results_Keras/ZZTo2L2Nu/skimmed/METpred_vs_GenMET.json", orient="records")
     
-    plt.title('Scatter Plot of Predicted vs True')
-    plt.xlabel('TrueMET')
-    plt.ylabel('PredictedMET')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()

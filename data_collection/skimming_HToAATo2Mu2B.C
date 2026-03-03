@@ -3,11 +3,127 @@
 #include <TFile.h>
 #include <iostream>
 #include <utility>
+#include <algorithm>
 #include <cstddef>
 
+
+
+/**
+ * @brief Defines single value input global variables:
+ * - the entries have name and type of the dataset Branches;
+ * - the entries Branch status is set to one;
+ * - gets the address of the Branches in order to copy their values.
+ */
+struct Branches {
+    // Input branches
+    Float_t MET_pt;
+    Float_t MET_phi;
+    Float_t MET_covXX;
+    Float_t MET_covXY;
+    Float_t MET_covYY;
+    Float_t MET_significance;
+    Float_t GenMET_pt;
+    Float_t PV_chi2;
+    Float_t PV_score;
+    Float_t PV_x;
+    Float_t PV_y;
+    Float_t PV_z;
+    UInt_t nSV;
+    UInt_t nJet;
+    UInt_t nMuon;
+
+    void setup_branches(TChain* chain) {
+        chain->SetBranchStatus("*", 0);
+
+        chain->SetBranchStatus("MET_pt", 1);
+        chain->SetBranchStatus("MET_phi", 1);
+        chain->SetBranchStatus("MET_covXX", 1);
+        chain->SetBranchStatus("MET_covXY", 1);
+        chain->SetBranchStatus("MET_covYY", 1);
+        chain->SetBranchStatus("MET_significance", 1);
+        chain->SetBranchStatus("GenMET_pt", 1);
+        chain->SetBranchStatus("PV_chi2", 1);
+        chain->SetBranchStatus("PV_score", 1);
+        chain->SetBranchStatus("PV_x", 1);
+        chain->SetBranchStatus("PV_y", 1);
+        chain->SetBranchStatus("PV_z", 1);
+        chain->SetBranchStatus("nSV", 1);
+        chain->SetBranchStatus("nJet", 1);
+        chain->SetBranchStatus("nMuon", 1);
+
+        chain->SetBranchAddress("MET_pt", &MET_pt);
+        chain->SetBranchAddress("MET_phi", &MET_phi);
+        chain->SetBranchAddress("MET_covXX", &MET_covXX);
+        chain->SetBranchAddress("MET_covXY", &MET_covXY);
+        chain->SetBranchAddress("MET_covYY", &MET_covYY);
+        chain->SetBranchAddress("MET_significance", &MET_significance);
+        chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
+        chain->SetBranchAddress("PV_chi2", &PV_chi2);
+        chain->SetBranchAddress("PV_score", &PV_score);
+        chain->SetBranchAddress("PV_x", &PV_x);
+        chain->SetBranchAddress("PV_y", &PV_y);
+        chain->SetBranchAddress("PV_z", &PV_z);
+        chain->SetBranchAddress("nSV", &nSV);
+        chain->SetBranchAddress("nJet", &nJet);
+        chain->SetBranchAddress("nMuon", &nMuon);
+    }
+};
+
+
+
+/**
+ * @brief Gets the maximum number of jets.
+ */
+std::pair<UInt_t, UInt_t> getMaxNJetandMaxNMuon(TChain* chain, Long64_t n_events, UInt_t& nJet, UInt_t& nMuon) {
+    UInt_t max_nJet = 0;
+    UInt_t max_nMuon = 0;
+    for (Long64_t i = 0; i < n_events; i++) {
+        chain->GetEntry(i);
+        if (nJet > max_nJet) {
+            max_nJet = nJet;
+        }
+        if (nMuon > max_nMuon) {
+            max_nMuon = nMuon;
+        }
+    }
+    return {max_nJet, max_nMuon};
+}
+
+
+
+/**
+ * @brief Calculates mean and standard deviation of GenMET_pt.
+ */
+std::pair<Float_t, Float_t> computeMeanAndStdGenMET(TChain* chain, Long64_t n_events, Float_t& GenMET_pt) {
+    // Mean
+    Float_t sum = 0.0;
+
+    for (Long64_t i = 0; i < n_events; i++) {
+        chain->GetEntry(i);
+        sum += GenMET_pt;
+    }
+    Float_t GenMET_mean = sum / n_events;
+
+    // Standard deviation
+    Float_t GenMET_variance_num = 0.0;
+    for (Long64_t i = 0; i < n_events; i++) {
+        chain->GetEntry(i);
+        GenMET_variance_num += (GenMET_pt - GenMET_mean) * (GenMET_pt - GenMET_mean);
+    }
+    Float_t GenMET_variance = GenMET_variance_num / n_events;
+    Float_t GenMET_std = std::sqrt(GenMET_variance);
+
+    return {GenMET_mean, GenMET_std};
+}
+
+
+
+/**
+ * @brief Finds the two biggest indeces of the btag branch.
+ */
 std::pair<size_t, size_t> findTwoMaxIndices(const Float_t* arr, size_t n) {
     if (n < 2) {
-        throw std::invalid_argument("L'array deve contenere almeno 2 elementi");
+        throw std::invalid_argument("The array has to have at least two arguments.");
     }
 
     size_t maxIdx = 0;
@@ -17,7 +133,7 @@ std::pair<size_t, size_t> findTwoMaxIndices(const Float_t* arr, size_t n) {
         std::swap(maxIdx, secondMaxIdx);
     }
 
-    for (size_t i = 2; i < n; ++i) {
+    for (size_t i = 2; i < n; i++) {
         if (arr[i] > arr[maxIdx]) {
             secondMaxIdx = maxIdx;
             maxIdx = i;
@@ -28,6 +144,8 @@ std::pair<size_t, size_t> findTwoMaxIndices(const Float_t* arr, size_t n) {
 
     return {maxIdx, secondMaxIdx};
 }
+
+
 
 void skimming_HToAATo2Mu2B() {
     /**
@@ -48,107 +166,30 @@ void skimming_HToAATo2Mu2B() {
 
 
     /**
-     * @brief Sets all branch statuses to zero.
+     * @brief Sets up the branches.
      */
-    chain->SetBranchStatus("*", 0);
-
-
-
-    /**
-     * @brief Defines single value input global variables:
-     * - the entries have name and type of the dataset Branches;
-     * - the entries Branch status is set to one;
-     * - gets the address of the Branches in order to copy their values.
-     * TODO: add check if Branches don't exist in the original dataset.
-     */
-    // Single value variables
-    Float_t MET_pt;
-    Float_t MET_phi;
-    Float_t MET_covXX;
-    Float_t MET_covXY;
-    Float_t MET_covYY;
-    Float_t MET_significance;
-    Float_t GenMET_pt;
-    Float_t PV_chi2;
-    Float_t PV_score;
-    Float_t PV_x;
-    Float_t PV_y;
-    Float_t PV_z;
-    UInt_t nSV;
-    UInt_t nJet;
-    UInt_t nMuon;
-
-    std::cout << "Defined single value variables." << std::endl;
-
-    // Single variables status
-    chain->SetBranchStatus("MET_pt", 1);
-    chain->SetBranchStatus("MET_phi", 1);
-    chain->SetBranchStatus("MET_covXX", 1);
-    chain->SetBranchStatus("MET_covXY", 1);
-    chain->SetBranchStatus("MET_covYY", 1);
-    chain->SetBranchStatus("MET_significance", 1);
-    chain->SetBranchStatus("GenMET_pt", 1);
-    chain->SetBranchStatus("PV_chi2", 1);
-    chain->SetBranchStatus("PV_score", 1);
-    chain->SetBranchStatus("PV_x", 1);
-    chain->SetBranchStatus("PV_y", 1);
-    chain->SetBranchStatus("PV_z", 1);
-    chain->SetBranchStatus("nSV", 1);
-    chain->SetBranchStatus("nJet", 1);
-    chain->SetBranchStatus("nMuon", 1);
-
-    std::cout << "Set Branch status to 1." << std::endl;
-
-    // Single variables address
-    chain->SetBranchAddress("MET_pt", &MET_pt);
-    chain->SetBranchAddress("MET_phi", &MET_phi);
-    chain->SetBranchAddress("MET_covXX", &MET_covXX);
-    chain->SetBranchAddress("MET_covXY", &MET_covXY);
-    chain->SetBranchAddress("MET_covYY", &MET_covYY);
-    chain->SetBranchAddress("MET_significance", &MET_significance);
-    chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
-    chain->SetBranchAddress("PV_chi2", &PV_chi2);
-    chain->SetBranchAddress("PV_score", &PV_score);
-    chain->SetBranchAddress("PV_x", &PV_x);
-    chain->SetBranchAddress("PV_y", &PV_y);
-    chain->SetBranchAddress("PV_z", &PV_z);
-    chain->SetBranchAddress("nSV", &nSV);
-    chain->SetBranchAddress("nJet", &nJet);
-    chain->SetBranchAddress("nMuon", &nMuon);
-
-    std::cout << "Set all Branches addresses." << std::endl;
+    Branches branches;
+    branches.setup_branches(chain.get());
 
 
 
     /**
      * @brief Gets the maximum number of jets.
      */
-    UInt_t max_nJet = 0;
-
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        if (nJet > max_nJet) {
-            max_nJet = nJet;
-        }
-    }
+    auto [max_nJet, max_nMuon] = getMaxNJetandMaxNMuon(chain.get(), n_events, branches.nJet, branches.nMuon);
 
     std::cout << "Max number of JETS is: " << max_nJet << std::endl;
+    std::cout << "Max number of MUONS is: " << max_nMuon << std::endl;
 
 
 
     /**
-     * @brief Gets the maximum number of jets.
+     * @brief Calculates GenMET_pt mean and standard deviation.
      */
-    UInt_t max_nMuon = 0;
+    auto [GenMET_mean, GenMET_std] = computeMeanAndStdGenMET(chain.get(), n_events, branches.GenMET_pt);
 
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        if (nMuon > max_nMuon) {
-            max_nMuon = nMuon;
-        }
-    }
-
-    std::cout << "Max number of MUONS is: " << max_nMuon << std::endl;
+    std::cout << "Mean GenMET_pt: " << GenMET_mean << std::endl;
+    std::cout << "Standard deviation GenMET_pt: " << GenMET_std << std::endl;
 
 
 
@@ -197,20 +238,20 @@ void skimming_HToAATo2Mu2B() {
     chain->SetBranchStatus("Muon_pt", 1);
 
     // Variables address
-    chain->SetBranchAddress("Jet_eta", &Jet_eta);
-    chain->SetBranchAddress("Jet_pt", &Jet_pt);
-    chain->SetBranchAddress("Jet_phi", &Jet_phi);
-    chain->SetBranchAddress("Jet_mass", &Jet_mass);
-    chain->SetBranchAddress("Jet_area", &Jet_area);
-    chain->SetBranchAddress("Jet_btagDeepFlavB", &Jet_btagDeepFlavB);
+    chain->SetBranchAddress("Jet_eta", Jet_eta);
+    chain->SetBranchAddress("Jet_pt", Jet_pt);
+    chain->SetBranchAddress("Jet_phi", Jet_phi);
+    chain->SetBranchAddress("Jet_mass", Jet_mass);
+    chain->SetBranchAddress("Jet_area", Jet_area);
+    chain->SetBranchAddress("Jet_btagDeepFlavB", Jet_btagDeepFlavB);
 
-    chain->SetBranchAddress("Muon_charge", &Muon_charge);
-    chain->SetBranchAddress("Muon_dxy", &Muon_dxy);
-    chain->SetBranchAddress("Muon_dz", &Muon_dz);
-    chain->SetBranchAddress("Muon_eta", &Muon_eta);
-    chain->SetBranchAddress("Muon_mass", &Muon_mass);
-    chain->SetBranchAddress("Muon_phi", &Muon_phi);
-    chain->SetBranchAddress("Muon_pt", &Muon_pt);
+    chain->SetBranchAddress("Muon_charge", Muon_charge);
+    chain->SetBranchAddress("Muon_dxy", Muon_dxy);
+    chain->SetBranchAddress("Muon_dz", Muon_dz);
+    chain->SetBranchAddress("Muon_eta", Muon_eta);
+    chain->SetBranchAddress("Muon_mass", Muon_mass);
+    chain->SetBranchAddress("Muon_phi", Muon_phi);
+    chain->SetBranchAddress("Muon_pt", Muon_pt);
 
 
 
@@ -218,33 +259,6 @@ void skimming_HToAATo2Mu2B() {
      * @brief Clone full TTree structure (not the content).
      */
     TTree *newtree = chain->CloneTree(0);
-
-
-
-    /**
-     * @brief Calculate mean and standard deviation of GenMET.
-     */
-    Float_t sum = 0.0;
-    Float_t sum2 = 0.0;
-
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        sum += GenMET_pt;
-    }
-
-    Float_t GenMET_mean = sum / n_events;
-    Float_t GenMET_variance_num = 0.0;
-
-    for (Long64_t i = 0; i < n_events; ++i) {
-        chain->GetEntry(i);
-        GenMET_variance_num += (GenMET_pt - GenMET_mean)*(GenMET_pt - GenMET_mean);
-    }
-
-    Float_t GenMET_variance = GenMET_variance_num / n_events;
-    Float_t GenMET_std = std::sqrt(GenMET_variance);
-
-    std::cout << "Mean GenMET_pt: " << GenMET_mean << std::endl;
-    std::cout << "Standard deviation GenMET_pt: " << GenMET_std << std::endl;
 
 
 
@@ -310,14 +324,14 @@ void skimming_HToAATo2Mu2B() {
     for (Long64_t i = 0; i < n_events; i++) {
         chain->GetEntry(i);
 
-        if (nMuon==2 && nJet>1) {
-            auto [maxIdx, secondMaxIdx] = findTwoMaxIndices(Jet_btagDeepFlavB, max_nJet);
+        if (branches.nMuon>=2 && branches.nJet>1) {
+            auto [maxIdx, secondMaxIdx] = findTwoMaxIndices(Jet_btagDeepFlavB, branches.nJet);
 
             // First two sorted b-tags
             Jet_btag_bst = Jet_btagDeepFlavB[maxIdx];
             Jet_btag_bnd = Jet_btagDeepFlavB[secondMaxIdx];
 
-            if (Jet_btag_bst>btag_threshold && Jet_btag_bnd>btag_threshold) {
+            if (Jet_btag_bst > btag_threshold && Jet_btag_bnd > btag_threshold) {
                 // Best Jet
                 Jet_eta_bst = Jet_eta[maxIdx];
                 Jet_pt_bst = Jet_pt[maxIdx];

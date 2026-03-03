@@ -13,17 +13,19 @@ void data_retrieving() {
      * @brief Open file from local path.
      * Returns an error if file is not opened.
      */
-    //TFile *file = TFile::Open("../datasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");
-    TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZZ.root");
+    TFile *file = TFile::Open("../OriginalDatasets/ZZZ/47348ED1-E550-CF48-9E94-BED2742AB141.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZZ.root");
     //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_ZZZ.root");
     
     //TFile *file = TFile::Open("../datasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
     //TFile *file = TFile::Open("../skimmed_datasets/skimmed_HToAATo2Mu2B.root");
-    //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_HToAATo2Mu2B.root");
+    //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_HToAATo2Mu2B_try.root");
     
     //TFile *file = TFile::Open("../datasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
     //TFile *file = TFile::Open("../skimmed_datasets/skimmed_ZZTo2L2Nu.root");
     //TFile *file = TFile::Open("../skimmed_datasets/specific_skimmed_ZZTo2L2Nu.root");
+
+    //TFile *file = TFile::Open("../SkimmedDatasets/skimmed_ZZTo2L2Nu.root");
 
     if (!file || file->IsZombie()) {
         std::cerr << "Error opening file." << std::endl;
@@ -46,7 +48,7 @@ void data_retrieving() {
         exit(-1);
     }
 
-    event->Show(2);
+    event->Show(13);
 
 
 
