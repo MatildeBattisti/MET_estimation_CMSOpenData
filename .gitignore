@@ -4,10 +4,8 @@
 # ROOT files
 *.root
 
-# Directories containing ROOT files
-datasets/
-
-skimmed_datasets/
+# Virtual environment
+venv/
 
 # Typst files for documentation
 *.typvenv/
