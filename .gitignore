@@ -9,3 +9,4 @@ venv/
 
 # Typst files for documentation
 *.typvenv/
+*.typ
