@@ -7,7 +7,7 @@ A working installation of the [ROOT framework](https://root.cern/install/) is re
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip 3 install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Background
