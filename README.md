@@ -5,10 +5,13 @@ This project explores the application of machine learning techniques to analyze 
 ## Setup
 A working installation of the [ROOT framework](https://root.cern/install/) is required. To install the Python dependencies:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python3 -m venv .
+source ./bin/activate
 pip3 install -r requirements.txt
 ```
+
+> **Note:** By default, the CPU version of TensorFlow is installed. If you have an NVIDIA GPU, you can enable GPU support by replacing `tensorflow` with `tensorflow[and-cuda]` in `requirements.txt` before installing.
+````
 
 ## Background
 
