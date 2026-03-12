@@ -13,6 +13,9 @@ import pandas as pd
 from itertools import product
 from tqdm import tqdm
 import time
+import shap
+import matplotlib.pyplot as plt
+
 
 
 # Branch configuration per dataset
@@ -90,7 +93,7 @@ def data_parsing(branches, data):
     return features, target
 
 
-def create_model(input_dim: int, n_layers: int, n_units: int, learning_rate: float):
+def create_model(input_dim: int, architecture: tuple, learning_rate: float):
     """
         Builds a Sequential model.
 
@@ -107,7 +110,7 @@ def create_model(input_dim: int, n_layers: int, n_units: int, learning_rate: flo
     model = Sequential()
     model.add(Input(shape=(input_dim,)))
 
-    for _ in range(n_layers):
+    for n_units in architecture:
         model.add(Dense(n_units))
         model.add(BatchNormalization())   # normalise activations per mini-batch
         model.add(keras.layers.ReLU())   # activation after BN (standard practice)
@@ -189,18 +192,17 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
 
             model = create_model(
                 input_dim=x_tr.shape[1],
-                n_layers=params["n_layers"],
-                n_units=params["n_units"],
+                architecture=params["architecture"],
                 learning_rate=params["learning_rate"]
             )
 
             early_stop = EarlyStopping(
-                monitor="val_loss", patience=10, restore_best_weights=True
+                monitor="val_loss", patience=15, restore_best_weights=True
             )
 
             history = model.fit(
                 train_ds,
-                epochs=100,
+                epochs=200,
                 validation_data=val_ds,
                 verbose=0,
                 callbacks=[early_stop]
@@ -264,18 +266,17 @@ def testing(X_train: np.ndarray, y_train: np.ndarray,
 
     best_model = create_model(
         input_dim=X_tr.shape[1],
-        n_layers=best_params["n_layers"],
-        n_units=best_params["n_units"],
+        architecture=best_params["architecture"],
         learning_rate=best_params["learning_rate"]
     )
 
     early_stop = EarlyStopping(
-        monitor="val_loss", patience=10, restore_best_weights=True
+        monitor="val_loss", patience=20, restore_best_weights=True
     )
 
     best_model.fit(
         train_ds,
-        epochs=100,
+        epochs=300,
         validation_data=val_ds,
         verbose=1,
         callbacks=[early_stop]
@@ -285,7 +286,7 @@ def testing(X_train: np.ndarray, y_train: np.ndarray,
 
     elapsed = time.time() - starting_time
     print(f"Retraining and testing completed in {elapsed:.1f}s")
-    return y_test_pred
+    return y_test_pred, history, best_model
 
 
 def results_evaluation(data: dict, y_test: np.ndarray, y_test_pred: np.ndarray):
@@ -308,6 +309,62 @@ def results_evaluation(data: dict, y_test: np.ndarray, y_test_pred: np.ndarray):
     print("Evaluation metrics:")
     print(f"    Baseline  RMSE={baseline['RMSE']:.4f}  MAE={baseline['MAE']:.4f}  R²={baseline['R2']:.4f}")
     print(f"    Predicted RMSE={predicted['RMSE']:.4f}  MAE={predicted['MAE']:.4f}  R²={predicted['R2']:.4f}")
+    return
+
+
+
+def feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
+                             event: str, output_dir: str):
+    """
+    Computes SHAP values using a background sample from X_test and plots:
+    - beeswarm summary plot (global importance + direction of effect)
+    - bar plot (mean |SHAP| per feature)
+    """
+    print("Computing SHAP values...")
+
+    # Background sample for the explainer (100 points is enough for a NN)
+    background = X_test[:100].astype(np.float32)
+    explainer  = shap.DeepExplainer(model, background)
+
+    # Explain a sample of test events (500 is reasonable for speed)
+    sample     = X_test[:500].astype(np.float32)
+    shap_values = explainer.shap_values(sample)   # shape: (500, n_features, 1)
+    shap_values = shap_values[..., 0]             # squeeze output dim -> (500, n_features)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Beeswarm plot
+    shap.summary_plot(
+        shap_values, sample,
+        feature_names=feature_names,
+        show=False
+    )
+    plt.title(f"SHAP Summary — {event}", fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f"shap_summary_{event}.png"), dpi=150, bbox_inches="tight")
+    plt.show()
+    plt.close()
+
+    # Bar plot (mean |SHAP|)
+    shap.summary_plot(
+        shap_values, sample,
+        feature_names=feature_names,
+        plot_type="bar",
+        show=False
+    )
+    plt.title(f"SHAP Feature Importance — {event}", fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, f"shap_bar_{event}.png"), dpi=150, bbox_inches="tight")
+    plt.show()
+    plt.close()
+
+    # Print ranked importance
+    mean_shap = np.abs(shap_values).mean(axis=0)
+    ranked    = sorted(zip(feature_names, mean_shap), key=lambda x: x[1], reverse=True)
+    print(f"Feature importance (mean |SHAP|) for {event}:")
+    for name, val in ranked:
+        print(f"    {name:<35} {val:.4f}")
+    return
 
 
 
@@ -324,19 +381,36 @@ if __name__ == "__main__":
 
     # Grid-search with K-Fold CV (test set held-out throughout)
     hparam_grid = {
-        "n_layers":      [1, 2],
-        "n_units":       [32, 64, 128],
-        "batch_size":    [32, 64],
-        "learning_rate": [1e-3, 1e-4],
+        "architecture": [
+            # shallow
+            (32,), (64,), (128,), (256,),
+            # 2 layer
+            (128, 64), (256, 128), (128, 32), (64, 32),
+            # 3 layer
+            (256, 128, 64), (128, 64, 32), (256, 64, 32),
+            # 4 layer
+            (256, 128, 64, 32), (128, 128, 64, 32),
+        ],
+        "batch_size":    [64, 128, 256],
+        "learning_rate": [1e-3, 5e-4, 1e-4],
     }
 
     X_train, y_train, X_test, y_test, best_params = search_best_model(features, target, hparam_grid, OUTPUT_DIR)
 
     # Retrain best model and predict on test set
-    y_test_pred = testing(X_train, y_train, X_test, best_params)
+    y_test_pred, history, best_model = testing(X_train, y_train, X_test, best_params)
 
     # Evaluate and save metrics
     results_evaluation(data, y_test, y_test_pred)
+
+    # Feature importance via SHAP
+    feature_names = [b for b in branches if b != "GenMET_pt"]
+    feature_importance_shap(best_model, X_test, feature_names, EVENT, OUTPUT_DIR)
+
+    # Save learning curves for external plotting
+    pd.DataFrame(history.history).to_parquet(
+        os.path.join(OUTPUT_DIR, f"learning_curves_{EVENT}.parquet"), index=False
+    )
 
     # Save scatter data for external plotting
     pd.DataFrame({
