@@ -3,8 +3,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 import keras
 from keras.models import Sequential
+from keras.regularizers import l2
 from keras.layers import Input, Dense, BatchNormalization, ReLU
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from keras.optimizers import Adam
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
@@ -15,7 +16,6 @@ from tqdm import tqdm
 import time
 import shap
 import matplotlib.pyplot as plt
-
 
 
 # Branch configuration per dataset
@@ -49,30 +49,48 @@ DEFAULT_BRANCHES = [
     "nSV", "GenMET_pt"
 ]
 
+# Per-dataset training configuration
+DATASET_CFG = {
+    "ZZTo2L2Nu": {
+        "clipnorm":            None,  # no clipping: larger natural gradients
+        "lr_patience":         12,    # conservative LR reduction
+        "es_patience_search":  15,
+        "es_patience_retrain": 20,
+        "l2_reg":              0.0,   # enough data, no L2 needed
+    },
+    "HToAATo2Mu2B": {
+        "clipnorm":            1.0,   # clip gradients to stabilise small-dataset training
+        "lr_patience":         5,
+        "es_patience_search":  20,    # more patience: noisy loss with few events
+        "es_patience_retrain": 30,
+        "l2_reg":              1e-4,  # L2 regularisation to avoid overfitting
+    },
+}
+
 
 def read_data(file_path: str):
     """
         Reads a .parquet file. The event name is inferred from the filename
-    (   e.g. 'ZZTo2L2Nu.parquet' -> event 'ZZTo2L2Nu') to select the right branches.
+        (e.g. 'ZZTo2L2Nu.parquet' -> event 'ZZTo2L2Nu') to select the right branches.
     """
     filename = os.path.basename(file_path)
     event_name, ext = os.path.splitext(filename)
 
     if ext != ".parquet":
-        raise ValueError(f"    Expected a .parquet file, got '{ext}'.")
+        raise ValueError(f"Expected a .parquet file, got '{ext}'.")
 
     df = pd.read_parquet(file_path)
 
     if event_name in BRANCH_MAP:
         branches = BRANCH_MAP[event_name]
-        print(f"    Loaded dataset '{event_name}' with specific branches.")
+        print(f"Loaded dataset '{event_name}' with specific branches.")
     else:
         branches = DEFAULT_BRANCHES
-        print(f"    Loaded dataset '{event_name}' with default branches.")
+        print(f"Loaded dataset '{event_name}' with default branches.")
 
     missing = [b for b in branches if b not in df.columns]
     if missing:
-        raise ValueError(f"    Missing columns in parquet file: {missing}")
+        raise ValueError(f"Missing columns in parquet file: {missing}")
 
     data = {b: df[b].to_numpy() for b in branches}
     return branches, data
@@ -93,32 +111,38 @@ def data_parsing(branches, data):
     return features, target
 
 
-def create_model(input_dim: int, architecture: tuple, learning_rate: float):
+def create_model(input_dim: int, architecture: tuple, learning_rate: float,
+                 clipnorm: float = None, l2_reg: float = 0.0):
     """
         Builds a Sequential model.
 
-        BatchNormalization is placed after each hidden Dense layer and before the
-        activation. During training it normalises the pre-activation values over
-        the current mini-batch (zero mean, unit variance), learning per-feature
-        scale (gamma) and shift (beta) parameters. At inference time it uses
-        running statistics accumulated during training.
+        BatchNormalization after each Dense layer normalises activations per
+        mini-batch (zero mean, unit variance) and replaces a global StandardScaler.
 
-        This replaces the external StandardScaler: raw (unnormalised) features
-        can be fed directly and the network learns the appropriate normalisation
-        on its own, fold-by-fold.
+        l2_reg applies L2 weight regularisation to each Dense layer to penalise
+        large weights and reduce overfitting (used for HToAATo2Mu2B).
+
+        clipnorm in Adam clips the gradient norm to prevent large destabilising
+        updates (used for HToAATo2Mu2B, disabled for ZZTo2L2Nu).
     """
+    regularizer = l2(l2_reg) if l2_reg > 0.0 else None
+
     model = Sequential()
     model.add(Input(shape=(input_dim,)))
 
     for n_units in architecture:
-        model.add(Dense(n_units))
-        model.add(BatchNormalization())   # normalise activations per mini-batch
-        model.add(keras.layers.ReLU())   # activation after BN (standard practice)
+        model.add(Dense(n_units, kernel_regularizer=regularizer))
+        model.add(BatchNormalization())
+        model.add(keras.layers.ReLU())
 
     model.add(Dense(1, activation="linear"))
 
+    optimizer_kwargs = {"learning_rate": learning_rate}
+    if clipnorm is not None:
+        optimizer_kwargs["clipnorm"] = clipnorm
+
     model.compile(
-        optimizer=Adam(learning_rate=learning_rate),
+        optimizer=Adam(**optimizer_kwargs),
         loss="mse",
         metrics=["mse"]
     )
@@ -141,7 +165,8 @@ def build_tf_dataset(X: np.ndarray, y: np.ndarray, batch_size: int,
     return ds
 
 
-def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, output_dir: str):
+def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid,
+                      output_dir: str, EVENT: str, cfg: dict):
     """
         1. Splits data into train (80%) and test (20%). The test set is held-out
            and never seen during hyper-parameter search.
@@ -164,7 +189,7 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
 
     best_score = float("inf")
     best_params = None
-    all_results = []  # collect results for every combination
+    all_results = []
 
     print("GRID SEARCH OVER K-FOLD CV")
     print(f"    Total combinations: {len(param_combinations)}. Folds: {kf.n_splits}\n")
@@ -186,18 +211,24 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
             x_tr,  x_val  = X_train[train_idx], X_train[val_idx]
             y_tr,  y_val  = y_train[train_idx],  y_train[val_idx]
 
-            # Mini-batch datasets
             train_ds = build_tf_dataset(x_tr,  y_tr,  params["batch_size"], shuffle=True)
             val_ds   = build_tf_dataset(x_val, y_val, params["batch_size"], shuffle=False)
 
             model = create_model(
                 input_dim=x_tr.shape[1],
                 architecture=params["architecture"],
-                learning_rate=params["learning_rate"]
+                learning_rate=params["learning_rate"],
+                clipnorm=cfg["clipnorm"],
+                l2_reg=cfg["l2_reg"],
             )
 
             early_stop = EarlyStopping(
-                monitor="val_loss", patience=15, restore_best_weights=True
+                monitor="val_loss", patience=cfg["es_patience_search"],
+                restore_best_weights=True
+            )
+            reduce_lr = ReduceLROnPlateau(
+                monitor="val_loss", factor=0.5,
+                patience=5, min_delta=1.0, min_lr=1e-6, verbose=0
             )
 
             history = model.fit(
@@ -205,7 +236,7 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
                 epochs=200,
                 validation_data=val_ds,
                 verbose=0,
-                callbacks=[early_stop]
+                callbacks=[early_stop, reduce_lr]
             )
 
             epochs_run = len(history.history["loss"])
@@ -218,7 +249,6 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
         std_rmse = np.std(val_scores)
         print(f"        Avg RMSE: {avg_rmse:.4f} +/- {std_rmse:.4f}\n")
 
-        # Collect result row
         row = {**params, "avg_rmse": avg_rmse, "std_rmse": std_rmse}
         for j, s in enumerate(val_scores, 1):
             row[f"rmse_fold{j}"] = s
@@ -228,14 +258,11 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
             best_score = avg_rmse
             best_params = params
 
-    # Save all hyper-parameter results
     os.makedirs(output_dir, exist_ok=True)
-    hparam_log_path = os.path.join(output_dir, "hparam_search_results.csv")
+    hparam_log_path = os.path.join(output_dir, f"hparam_search_results_{EVENT}.csv")
     pd.DataFrame(all_results).sort_values("avg_rmse").to_csv(hparam_log_path, index=False)
-    print(f"Hyper-parameter search log saved -> {hparam_log_path}")
 
     elapsed = time.time() - starting_time
-
     print(f"BEST PARAMETERS: {best_params}")
     print(f"    Best Avg RMSE : {best_score:.4f}")
     print(f"    Completed in : {elapsed:.1f}s")
@@ -244,7 +271,7 @@ def search_best_model(features: np.ndarray, target: np.ndarray, hparam_grid, out
 
 
 def testing(X_train: np.ndarray, y_train: np.ndarray,
-            X_test: np.ndarray, best_params: dict):
+            X_test: np.ndarray, best_params: dict, cfg: dict):
     """
         Retrains with best hyper-parameters on the full training set (minus a
         small validation split used only for early stopping), then predicts on
@@ -257,9 +284,8 @@ def testing(X_train: np.ndarray, y_train: np.ndarray,
     )
 
     train_ds = build_tf_dataset(X_tr,  y_tr,  best_params["batch_size"], shuffle=True)
-    val_ds = build_tf_dataset(X_val, y_val, best_params["batch_size"], shuffle=False)
-    # Dummy target (zeros) for the inference pipeline; predictions are used, not labels
-    test_ds = build_tf_dataset(
+    val_ds   = build_tf_dataset(X_val, y_val, best_params["batch_size"], shuffle=False)
+    test_ds  = build_tf_dataset(
         X_test, np.zeros(len(X_test), dtype=np.float32),
         best_params["batch_size"], shuffle=False
     )
@@ -267,19 +293,26 @@ def testing(X_train: np.ndarray, y_train: np.ndarray,
     best_model = create_model(
         input_dim=X_tr.shape[1],
         architecture=best_params["architecture"],
-        learning_rate=best_params["learning_rate"]
+        learning_rate=best_params["learning_rate"],
+        clipnorm=cfg["clipnorm"],
+        l2_reg=cfg["l2_reg"],
     )
 
     early_stop = EarlyStopping(
-        monitor="val_loss", patience=20, restore_best_weights=True
+        monitor="val_loss", patience=cfg["es_patience_retrain"],
+        restore_best_weights=True
+    )
+    reduce_lr = ReduceLROnPlateau(
+        monitor="val_loss", factor=0.5,
+        patience=cfg["lr_patience"], min_delta=1.0, min_lr=1e-6, verbose=1
     )
 
-    best_model.fit(
+    history = best_model.fit(
         train_ds,
         epochs=300,
         validation_data=val_ds,
         verbose=1,
-        callbacks=[early_stop]
+        callbacks=[early_stop, reduce_lr]
     )
 
     y_test_pred = best_model.predict(test_ds, verbose=0)
@@ -309,36 +342,29 @@ def results_evaluation(data: dict, y_test: np.ndarray, y_test_pred: np.ndarray):
     print("Evaluation metrics:")
     print(f"    Baseline  RMSE={baseline['RMSE']:.4f}  MAE={baseline['MAE']:.4f}  R²={baseline['R2']:.4f}")
     print(f"    Predicted RMSE={predicted['RMSE']:.4f}  MAE={predicted['MAE']:.4f}  R²={predicted['R2']:.4f}")
-    return
-
 
 
 def feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
                              event: str, output_dir: str):
     """
-    Computes SHAP values using a background sample from X_test and plots:
-    - beeswarm summary plot (global importance + direction of effect)
-    - bar plot (mean |SHAP| per feature)
+        Computes SHAP values using GradientExplainer (more compatible with Keras 3 + TF > 2.4).
+        Plots:
+        - beeswarm summary plot (global importance + direction of effect)
+        - bar plot (mean |SHAP| per feature)
+        Also saves the ranked importance to a CSV.
     """
-    print("Computing SHAP values...")
 
-    # Background sample for the explainer (100 points is enough for a NN)
-    background = X_test[:100].astype(np.float32)
-    explainer  = shap.DeepExplainer(model, background)
-
-    # Explain a sample of test events (500 is reasonable for speed)
     sample     = X_test[:500].astype(np.float32)
-    shap_values = explainer.shap_values(sample)   # shape: (500, n_features, 1)
-    shap_values = shap_values[..., 0]             # squeeze output dim -> (500, n_features)
+    background = X_test[:100].astype(np.float32)
+
+    explainer   = shap.GradientExplainer(model, background)
+    shap_values = explainer.shap_values(sample)
+    sv = np.array(shap_values)[..., 0]
 
     os.makedirs(output_dir, exist_ok=True)
 
     # Beeswarm plot
-    shap.summary_plot(
-        shap_values, sample,
-        feature_names=feature_names,
-        show=False
-    )
+    shap.summary_plot(sv, sample, feature_names=feature_names, show=False)
     plt.title(f"SHAP Summary — {event}", fontsize=12, fontweight="bold")
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"shap_summary_{event}.png"), dpi=150, bbox_inches="tight")
@@ -346,32 +372,36 @@ def feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
     plt.close()
 
     # Bar plot (mean |SHAP|)
-    shap.summary_plot(
-        shap_values, sample,
-        feature_names=feature_names,
-        plot_type="bar",
-        show=False
-    )
+    shap.summary_plot(sv, sample, feature_names=feature_names, plot_type="bar", show=False)
     plt.title(f"SHAP Feature Importance — {event}", fontsize=12, fontweight="bold")
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"shap_bar_{event}.png"), dpi=150, bbox_inches="tight")
     plt.show()
     plt.close()
 
-    # Print ranked importance
-    mean_shap = np.abs(shap_values).mean(axis=0)
+    # Ranked importance
+    mean_shap = np.abs(sv).mean(axis=0)
     ranked    = sorted(zip(feature_names, mean_shap), key=lambda x: x[1], reverse=True)
+
     print(f"Feature importance (mean |SHAP|) for {event}:")
     for name, val in ranked:
         print(f"    {name:<35} {val:.4f}")
-    return
 
+    pd.DataFrame(ranked, columns=["feature", "mean_abs_shap"]).to_csv(
+        os.path.join(output_dir, f"shap_importance_{event}.csv"), index=False
+    )
 
 
 if __name__ == "__main__":
-    EVENT = "ZZTo2L2Nu"
+    EVENT = "HToAATo2Mu2B"
     INPUT_FILE = f"CleanedDatasets/{EVENT}.parquet"
     OUTPUT_DIR = f"Results/"
+
+    print("GPUs available:", tf.config.list_physical_devices("GPU"))
+
+    # Load per-dataset configuration
+    cfg = DATASET_CFG.get(EVENT, DATASET_CFG["ZZTo2L2Nu"])
+    print(f"    Using config for '{EVENT}': {cfg}\n")
 
     # Load data
     branches, data = read_data(INPUT_FILE)
@@ -380,25 +410,35 @@ if __name__ == "__main__":
     features, target = data_parsing(branches, data)
 
     # Grid-search with K-Fold CV (test set held-out throughout)
+    #hparam_grid = {
+    #    "architecture": [
+    #        # shallow
+    #        (32,), (64,), (128,), (256,),
+    #        # 2 layer
+    #        (128, 64), (256, 128), (128, 32), (64, 32),
+    #        # 3 layer
+    #        (256, 128, 64), (128, 64, 32), (256, 64, 32),
+    #        # 4 layer
+    #        (256, 128, 64, 32), (128, 128, 64, 32),
+    #    ],
+    #    "batch_size":    [32, 62, 128, 256],#[256, 512, 1024],
+    #    "learning_rate": [1e-3, 5e-4, 1e-4],
+    #}
     hparam_grid = {
         "architecture": [
-            # shallow
             (32,), (64,), (128,), (256,),
-            # 2 layer
             (128, 64), (256, 128), (128, 32), (64, 32),
-            # 3 layer
-            (256, 128, 64), (128, 64, 32), (256, 64, 32),
-            # 4 layer
-            (256, 128, 64, 32), (128, 128, 64, 32),
         ],
-        "batch_size":    [64, 128, 256],
+        "batch_size":    [32, 64, 128, 256],
         "learning_rate": [1e-3, 5e-4, 1e-4],
     }
 
-    X_train, y_train, X_test, y_test, best_params = search_best_model(features, target, hparam_grid, OUTPUT_DIR)
+    X_train, y_train, X_test, y_test, best_params = search_best_model(
+        features, target, hparam_grid, OUTPUT_DIR, EVENT, cfg
+    )
 
     # Retrain best model and predict on test set
-    y_test_pred, history, best_model = testing(X_train, y_train, X_test, best_params)
+    y_test_pred, history, best_model = testing(X_train, y_train, X_test, best_params, cfg)
 
     # Evaluate and save metrics
     results_evaluation(data, y_test, y_test_pred)
