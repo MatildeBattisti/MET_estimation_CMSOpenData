@@ -1,5 +1,11 @@
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+import warnings
+warnings.filterwarnings("ignore")
+import absl.logging
+absl.logging.set_verbosity(absl.logging.ERROR)
+import logging
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
 import tensorflow as tf
 import keras
 from keras.models import Sequential
@@ -52,18 +58,18 @@ DEFAULT_BRANCHES = [
 # Per-dataset training configuration
 DATASET_CFG = {
     "ZZTo2L2Nu": {
-        "clipnorm":            None,  # no clipping: larger natural gradients
-        "lr_patience":         12,    # conservative LR reduction
+        "clipnorm":            None,
+        "lr_patience":         12,
         "es_patience_search":  15,
         "es_patience_retrain": 20,
-        "l2_reg":              0.0,   # enough data, no L2 needed
+        "l2_reg":              0.0,
     },
     "HToAATo2Mu2B": {
-        "clipnorm":            0.5,   # clip gradients to stabilise small-dataset training
-        "lr_patience":         8,
-        "es_patience_search":  35,    # more patience: noisy loss with few events
+        "clipnorm":            0.3,
+        "lr_patience":         10,
+        "es_patience_search":  40,
         "es_patience_retrain": 50,
-        "l2_reg":              1e-5,  # L2 regularisation to avoid overfitting
+        "l2_reg":              0.0,
     },
 }
 
@@ -99,7 +105,7 @@ def _read_data(file_path: str):
 def _data_parsing(branches, data):
     """
         Converts the branch dictionary into feature matrix and target vector.
-        No global StandardScaler here: normalisation happens per-batch inside the model.
+        No global StandardScaler here: standardization happens per-batch inside the model.
     """
     feature_names = [b for b in branches if b != "GenMET_pt"]
     features = np.column_stack([data[name] for name in feature_names])
@@ -120,10 +126,10 @@ def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
         mini-batch (zero mean, unit variance) and replaces a global StandardScaler.
 
         l2_reg applies L2 weight regularisation to each Dense layer to penalise
-        large weights and reduce overfitting (used for HToAATo2Mu2B).
+        large weights and reduce overfitting.
 
         clipnorm in Adam clips the gradient norm to prevent large destabilising
-        updates (used for HToAATo2Mu2B, disabled for ZZTo2L2Nu).
+        updates.
     """
     regularizer = l2(l2_reg) if l2_reg > 0.0 else None
 
@@ -174,6 +180,7 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
         3. For each fold, data is fed as mini-batches via tf.data.Dataset.
         4. Selects best hyper-parameters by lowest average validation RMSE.
         5. Saves all hyper-parameter combinations and their RMSE to a CSV file.
+        6. Saves fold histories (loss, val_loss) for the best combo for plotting.
     """
     starting_time = time.time()
 
@@ -189,6 +196,8 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
 
     best_score = float("inf")
     best_params = None
+    target_train_loss = None
+    best_fold_histories = None
     all_results = []
 
     print("GRID SEARCH OVER K-FOLD CV")
@@ -197,7 +206,10 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
     for i, combo in enumerate(param_combinations, 1):
         params = dict(zip(param_keys, combo))
         print(f"    [{i}/{len(param_combinations)}] Testing params: {params}")
+
         val_scores = []
+        best_train_loss_per_fold = []
+        combo_fold_histories = []
 
         fold_bar = tqdm(
             enumerate(kf.split(X_train), 1),
@@ -206,8 +218,6 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
             leave=False,
             unit="fold"
         )
-
-        best_train_loss_per_fold = []
 
         for fold_idx, (train_idx, val_idx) in fold_bar:
             x_tr,  x_val  = X_train[train_idx], X_train[val_idx]
@@ -230,7 +240,7 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
             )
             reduce_lr = ReduceLROnPlateau(
                 monitor="val_loss", factor=0.5,
-                patience=5, min_delta=1.0, min_lr=1e-6, verbose=0
+                patience=5, min_delta=1e-2, min_lr=1e-6, verbose=0
             )
 
             history = model.fit(
@@ -242,9 +252,16 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
             )
 
             # Epoch at which val_loss was lowest
-            best_ep_idx = int(np.argmin(history.history["val_loss"]))   # <-- NEW
-            train_loss_at_best = history.history["loss"][best_ep_idx]   # <-- NEW
-            best_train_loss_per_fold.append(train_loss_at_best)         # <-- NEW
+            best_ep_idx = int(np.argmin(history.history["val_loss"]))
+            train_loss_at_best = history.history["loss"][best_ep_idx]
+            best_train_loss_per_fold.append(train_loss_at_best)
+
+            # Store fold history for plotting
+            combo_fold_histories.append({
+                "fold": fold_idx,
+                "loss": history.history["loss"],
+                "val_loss": history.history["val_loss"],
+            })
 
             epochs_run = len(history.history["loss"])
             y_pred = model.predict(val_ds, verbose=0)
@@ -255,7 +272,7 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
 
         avg_rmse = np.mean(val_scores)
         std_rmse = np.std(val_scores)
-        avg_target_train_loss = float(np.mean(best_train_loss_per_fold))   # <-- NEW
+        avg_target_train_loss = float(np.mean(best_train_loss_per_fold))
         print(f"        Avg RMSE: {avg_rmse:.4f} +/- {std_rmse:.4f}  |  "
               f"Avg train loss at best val epoch: {avg_target_train_loss:.4f}  "
               f"{[f'{v:.4f}' for v in best_train_loss_per_fold]}\n")
@@ -269,7 +286,8 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
         if avg_rmse < best_score:
             best_score            = avg_rmse
             best_params           = params
-            target_train_loss     = avg_target_train_loss  
+            target_train_loss     = avg_target_train_loss
+            best_fold_histories = combo_fold_histories 
 
     os.makedirs(output_dir, exist_ok=True)
     hparam_log_path = os.path.join(output_dir, f"hparam_search_results_{EVENT}.csv")
@@ -281,7 +299,19 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
     print(f"    Target train loss (retrain): {target_train_loss:.4f}")
     print(f"    Completed in : {elapsed:.1f}s")
 
-    return X_train, y_train, X_test, y_test, best_params, target_train_loss
+    # CV metrics for the best hyperparameter combo
+    best_row = next(r for r in all_results if r["avg_rmse"] == best_score)
+
+    best_cv_metrics = {
+        "cv_n_folds":          kf.n_splits,
+        "cv_avg_train_mse":    target_train_loss,
+        "cv_avg_train_rmse":   float(np.sqrt(target_train_loss)),
+        "cv_avg_val_mse":      float(best_score ** 2),
+        "cv_avg_val_rmse":     best_score,
+        "cv_std_val_rmse":     float(best_row["std_rmse"]),
+    }
+
+    return X_train, y_train, X_test, y_test, best_params, target_train_loss, best_fold_histories, best_cv_metrics
 
 
 class StopAtTrainLoss(keras.callbacks.Callback):
@@ -304,8 +334,9 @@ class StopAtTrainLoss(keras.callbacks.Callback):
 
 
 def _retraining(X_train: np.ndarray, y_train: np.ndarray,
-            X_test: np.ndarray, best_params: dict, cfg: dict,
-            target_train_loss: float):                                      # <-- NEW parameter
+            X_test: np.ndarray, y_test: np.ndarray,
+            best_params: dict, cfg: dict,
+            target_train_loss: float):
     """
         Retrains with best hyper-parameters on the FULL training set.
 
@@ -314,8 +345,8 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
         across CV folds. No validation split is needed: the stopping criterion
         is entirely driven by the training loss on the full dataset.
 
-    A large epoch ceiling (500) is set as a safety net; in practice the
-    StopAtTrainLoss callback fires well before that.
+        A large epoch ceiling (500) is set as a safety net; in practice the
+        StopAtTrainLoss callback fires well before that.
     """
     starting_time = time.time()
 
@@ -336,11 +367,11 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
         l2_reg=cfg["l2_reg"],
     )
 
-    stop_at_loss = StopAtTrainLoss(target_train_loss)                      # <-- NEW
+    stop_at_loss = StopAtTrainLoss(target_train_loss)
 
     reduce_lr = ReduceLROnPlateau(
         monitor="loss", factor=0.5,
-        patience=cfg["lr_patience"], min_delta=1.0, min_lr=1e-6, verbose=1
+        patience=cfg["lr_patience"], min_delta=1e-2, min_lr=1e-6, verbose=1
     )
 
     history = best_model.fit(
@@ -350,11 +381,30 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
         callbacks=[stop_at_loss, reduce_lr]
     )
 
-    y_test_pred = best_model.predict(test_ds, verbose=0)
+    # Metrics on the full training set
+    y_train_pred       = best_model.predict(train_ds, verbose=0)
+    retrain_train_mse  = float(mean_squared_error(y_train, y_train_pred))
+    retrain_train_rmse = float(np.sqrt(retrain_train_mse))
+
+    # Metrics on the held-out test set
+    y_test_pred   = best_model.predict(test_ds, verbose=0)
+    retrain_test_mse  = float(mean_squared_error(y_test, y_test_pred))
+    retrain_test_rmse = float(np.sqrt(retrain_test_mse))
+
+
+    retrain_metrics = {
+        "retrain_train_mse":  retrain_train_mse,
+        "retrain_train_rmse": retrain_train_rmse,
+        "retrain_test_mse":   retrain_test_mse,
+        "retrain_test_rmse":  retrain_test_rmse,
+    }
+
+    print(f"  Train  MSE={retrain_train_mse:.4f}  RMSE={retrain_train_rmse:.4f}")
+    print(f"  Test   MSE={retrain_test_mse:.4f}   RMSE={retrain_test_rmse:.4f}")
 
     elapsed = time.time() - starting_time
     print(f"Retraining and testing completed in {elapsed:.1f}s")
-    return y_test_pred, history, best_model
+    return y_test_pred, history, best_model, retrain_metrics
 
 
 def _results_evaluation(data: dict, y_test: np.ndarray, y_test_pred: np.ndarray):
@@ -377,6 +427,7 @@ def _results_evaluation(data: dict, y_test: np.ndarray, y_test_pred: np.ndarray)
     print("Evaluation metrics:")
     print(f"    Baseline  RMSE={baseline['RMSE']:.4f}  MAE={baseline['MAE']:.4f}  R²={baseline['R2']:.4f}")
     print(f"    Predicted RMSE={predicted['RMSE']:.4f}  MAE={predicted['MAE']:.4f}  R²={predicted['R2']:.4f}")
+    return
 
 
 def _feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
@@ -425,6 +476,56 @@ def _feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
     pd.DataFrame(ranked, columns=["feature", "mean_abs_shap"]).to_csv(
         os.path.join(output_dir, f"shap_importance_{event}.csv"), index=False
     )
+    return
+
+
+def _save_run_summary(event: str, best_params: dict, cfg: dict,
+                      best_cv_metrics: dict, retrain_metrics: dict,
+                      y_test: np.ndarray, y_test_pred: np.ndarray,
+                      output_dir: str):
+    """
+    Saves a single-row CSV summarising the full run:
+      - best hyperparameters
+      - training config (clipnorm, lr_patience, etc.)
+      - CV metrics for the best combo (avg train/val MSE, RMSE, n_folds)
+      - retraining train MSE/RMSE
+      - test set MSE/RMSE
+    """
+    test_mse  = mean_squared_error(y_test, y_test_pred)
+    test_rmse = np.sqrt(test_mse)
+
+    row = {
+        "event": event,
+        # --- best hyperparameters ---
+        "architecture":   str(best_params["architecture"]),
+        "batch_size":     best_params["batch_size"],
+        "learning_rate":  best_params["learning_rate"],
+        # --- training config ---
+        "clipnorm":            cfg["clipnorm"],
+        "lr_patience":         cfg["lr_patience"],
+        "es_patience_search":  cfg["es_patience_search"],
+        "es_patience_retrain": cfg["es_patience_retrain"],
+        "l2_reg":              cfg["l2_reg"],
+        # --- CV metrics (best combo) ---
+        "cv_n_folds":          best_cv_metrics["cv_n_folds"],
+        "cv_avg_train_mse":    best_cv_metrics["cv_avg_train_mse"],
+        "cv_avg_train_rmse":   best_cv_metrics["cv_avg_train_rmse"],
+        "cv_avg_val_mse":      best_cv_metrics["cv_avg_val_mse"],
+        "cv_avg_val_rmse":     best_cv_metrics["cv_avg_val_rmse"],
+        "cv_std_val_rmse":     best_cv_metrics["cv_std_val_rmse"],
+        # --- retraining metrics (full train set) ---
+        "retrain_train_mse":   retrain_metrics["retrain_train_mse"],
+        "retrain_train_rmse":  retrain_metrics["retrain_train_rmse"],
+        # --- test set metrics ---
+        "test_mse":   test_mse,
+        "test_rmse":  test_rmse,
+    }
+
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"run_summary_{event}.csv")
+    pd.DataFrame([row]).to_csv(path, index=False)
+    print(f"Run summary saved to {path}")
+    return
 
 
 if __name__ == "__main__":
@@ -463,23 +564,43 @@ if __name__ == "__main__":
         "architecture": [
             (128,), (256,),
             (256, 128), (512, 256), (256, 64),
-            (128, 64, 32), (256, 128, 64), (512, 256, 128),
+            (128, 64, 32),# (256, 128, 64), (512, 256, 128),
         ],
-        "batch_size":    [8, 16, 32],
-        "learning_rate": [1e-3, 5e-4, 1e-4, 5e-5],
+        "batch_size":    [64, 128],
+        "learning_rate": [1e-3, 5e-4],
     }
 
-    X_train, y_train, X_test, y_test, best_params, target_train_loss = _model_selection(
+    X_train, y_train, X_test, y_test, best_params, target_train_loss, best_fold_histories, best_cv_metrics = _model_selection(
         features, target, hparam_grid, OUTPUT_DIR, EVENT, cfg
     )
 
+    rows = []
+    for fh in best_fold_histories:
+        for ep, (tl, vl) in enumerate(zip(fh["loss"], fh["val_loss"]), 1):
+            rows.append({"fold": fh["fold"], "epoch": ep, "loss": tl, "val_loss": vl})
+
+    pd.DataFrame(rows).to_parquet(
+        os.path.join(OUTPUT_DIR, f"fold_histories_{EVENT}.parquet"), index=False
+    )
+
     # Retrain best model and predict on test set
-    y_test_pred, history, best_model = _retraining(
+    y_test_pred, history, best_model, retrain_metrics = _retraining(
         X_train, y_train, X_test, best_params, cfg, target_train_loss
     )
 
     # Evaluate and save metrics
     _results_evaluation(data, y_test, y_test_pred)
+
+    _save_run_summary(
+        event=EVENT,
+        best_params=best_params,
+        cfg=cfg,
+        best_cv_metrics=best_cv_metrics,
+        retrain_metrics=retrain_metrics,
+        y_test=y_test,
+        y_test_pred=y_test_pred,
+        output_dir=OUTPUT_DIR,
+    )
 
     # Feature importance via SHAP
     feature_names = [b for b in branches if b != "GenMET_pt"]
