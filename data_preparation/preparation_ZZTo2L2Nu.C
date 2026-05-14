@@ -1,433 +1,221 @@
 #include <TTree.h>
 #include <TChain.h>
 #include <TFile.h>
+#include <ROOT/RDataFrame.hxx>
+#include <ROOT/RVec.hxx>
 #include <iostream>
+#include <string>
 #include <vector>
 #include <cmath>
+#include <cstdio>
 
 
-
-/**
- * @brief Defines single value input global variables:
- * - the entries have name and type of the corresponding Branches;
- * - the entries Branch status is set to one;
- * - gets the address of the Branches in order to copy their values.
- */
-struct Branches {
-    Float_t MET_pt;
-    Float_t MET_phi;
-    Float_t MET_covXX;
-    Float_t MET_covXY;
-    Float_t MET_covYY;
-    Float_t MET_significance;
-    Float_t GenMET_pt;
-    Float_t PV_chi2;
-    Float_t PV_score;
-    Float_t PV_x;
-    Float_t PV_y;
-    Float_t PV_z;
-    UInt_t nSV;
-    UInt_t nElectron;
-    UInt_t nMuon;
-
-    void setup_branches(TChain* chain) {
-        chain->SetBranchStatus("*", 0);
-
-        chain->SetBranchStatus("MET_pt", 1);
-        chain->SetBranchStatus("MET_phi", 1);
-        chain->SetBranchStatus("MET_covXX", 1);
-        chain->SetBranchStatus("MET_covXY", 1);
-        chain->SetBranchStatus("MET_covYY", 1);
-        chain->SetBranchStatus("MET_significance", 1);
-        chain->SetBranchStatus("GenMET_pt", 1);
-        chain->SetBranchStatus("PV_chi2", 1);
-        chain->SetBranchStatus("PV_score", 1);
-        chain->SetBranchStatus("PV_x", 1);
-        chain->SetBranchStatus("PV_y", 1);
-        chain->SetBranchStatus("PV_z", 1);
-        chain->SetBranchStatus("nSV", 1);
-        chain->SetBranchStatus("nElectron", 1);
-        chain->SetBranchStatus("nMuon", 1);
-
-        chain->SetBranchAddress("MET_pt", &MET_pt);
-        chain->SetBranchAddress("MET_phi", &MET_phi);
-        chain->SetBranchAddress("MET_covXX", &MET_covXX);
-        chain->SetBranchAddress("MET_covXY", &MET_covXY);
-        chain->SetBranchAddress("MET_covYY", &MET_covYY);
-        chain->SetBranchAddress("MET_significance", &MET_significance);
-        chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
-        chain->SetBranchAddress("PV_chi2", &PV_chi2);
-        chain->SetBranchAddress("PV_score", &PV_score);
-        chain->SetBranchAddress("PV_x", &PV_x);
-        chain->SetBranchAddress("PV_y", &PV_y);
-        chain->SetBranchAddress("PV_z", &PV_z);
-        chain->SetBranchAddress("nSV", &nSV);
-        chain->SetBranchAddress("nElectron", &nElectron);
-        chain->SetBranchAddress("nMuon", &nMuon);
-    }
-};
-
+using RNode = ROOT::RDF::RNode;
+template<typename T> using RVec = ROOT::RVec<T>;
 
 
 /**
- * @brief Gets the maximum number of leptons.
+ * @brief Prints dataset statistics:
+ * - number of total events;
+ * - maximum number of leptons;
+ * - mean and standard deviation of GenMET_pt.
  */
-struct MaxLeptons {
-    UInt_t nElectron;
-    UInt_t nMuon;
-};
+void print_stats(ROOT::RDataFrame& df) {
+    auto n_tot = df.Count();
+    auto max_ne = df.Max<UInt_t>("nElectron");
+    auto max_nm = df.Max<UInt_t>("nMuon");
+    auto mean_genmet = df.Mean<Float_t>("GenMET_pt");
+    auto stddev_genmet = df.StdDev<Float_t>("GenMET_pt");
 
-MaxLeptons getMaxLeptons(TChain* chain, Long64_t n_events,
-                        UInt_t& nElectron, UInt_t& nMuon) {
-    MaxLeptons max = {0, 0};
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        if (nElectron  > max.nElectron) max.nElectron = nElectron;
-        if (nMuon > max.nMuon) max.nMuon = nMuon;
-    }
-    return max;
+    std::cout << "nEvents before skimming:          " << *n_tot        << "\n"
+              << "Max nElectron:                    " << *max_ne       << "\n"
+              << "Max nMuon:                        " << *max_nm       << "\n"
+              << "Mean GenMET_pt:                   " << *mean_genmet  << "\n"
+              << "StdDev GenMET_pt:                 " << *stddev_genmet << "\n";
 }
-
 
 
 /**
- * @brief Calculates mean and standard deviation of GenMET_pt.
+ * @brief Helper function for the event loop.
+ * Adds the electrons columns to the node while keeping the muons columns
+ * empty (2e + 0mu) channel.
  */
-std::pair<Float_t, Float_t> computeMeanAndStdGenMET(TChain* chain, Long64_t n_events, Float_t& GenMET_pt) {
-    // Mean
-    Float_t sum = 0.0;
-
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        sum += GenMET_pt;
-    }
-    Float_t GenMET_mean = sum / n_events;
-
-    // Standard deviation
-    Float_t GenMET_variance_num = 0.0;
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        GenMET_variance_num += (GenMET_pt - GenMET_mean) * (GenMET_pt - GenMET_mean);
-    }
-    Float_t GenMET_variance = GenMET_variance_num / n_events;
-    Float_t GenMET_std = std::sqrt(GenMET_variance);
-
-    return {GenMET_mean, GenMET_std};
+RNode define_ee_columns(RNode df) {
+    return df
+        // First electron
+        .Define("Electron_charge_st", [](const RVec<Int_t>&   v){ return v[0]; }, {"Electron_charge"})
+        .Define("Electron_dxy_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_dxy"})
+        .Define("Electron_dz_st",     [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_dz"})
+        .Define("Electron_eta_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_eta"})
+        .Define("Electron_mass_st",   [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_mass"})
+        .Define("Electron_phi_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_phi"})
+        .Define("Electron_pt_st",     [](const RVec<Float_t>& v){ return v[0]; }, {"Electron_pt"})
+        // Second electron
+        .Define("Electron_charge_nd", [](const RVec<Int_t>&   v){ return v[1]; }, {"Electron_charge"})
+        .Define("Electron_dxy_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_dxy"})
+        .Define("Electron_dz_nd",     [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_dz"})
+        .Define("Electron_eta_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_eta"})
+        .Define("Electron_mass_nd",   [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_mass"})
+        .Define("Electron_phi_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_phi"})
+        .Define("Electron_pt_nd",     [](const RVec<Float_t>& v){ return v[1]; }, {"Electron_pt"})
+        // Empty muons
+        .Define("Muon_charge_st",  []{ return Int_t{0}; })
+        .Define("Muon_charge_nd",  []{ return Int_t{0}; })
+        .Define("Muon_dxy_st",     []{ return Float_t{0}; })
+        .Define("Muon_dxy_nd",     []{ return Float_t{0}; })
+        .Define("Muon_dz_st",      []{ return Float_t{0}; })
+        .Define("Muon_dz_nd",      []{ return Float_t{0}; })
+        .Define("Muon_eta_st",     []{ return Float_t{0}; })
+        .Define("Muon_eta_nd",     []{ return Float_t{0}; })
+        .Define("Muon_mass_st",    []{ return Float_t{0}; })
+        .Define("Muon_mass_nd",    []{ return Float_t{0}; })
+        .Define("Muon_phi_st",     []{ return Float_t{0}; })
+        .Define("Muon_phi_nd",     []{ return Float_t{0}; })
+        .Define("Muon_pt_st",      []{ return Float_t{0}; })
+        .Define("Muon_pt_nd",      []{ return Float_t{0}; });
 }
-
 
 
 /**
- * @brief Helper functions for the event loop.
- * Fill first or second lepton output variables from vector arrays.
- * Output variables are passed by reference instead of using globals.
+ * @brief Helper function for the event loop.
+ * Adds the muons columns to the node while keeping the electrons columns
+ * empty (0e + 2mu) channel.
  */
-void electron_variables(int idx,
-                        const std::vector<Int_t>&   Electron_charge,
-                        const std::vector<Float_t>& Electron_dxy,
-                        const std::vector<Float_t>& Electron_dz,
-                        const std::vector<Float_t>& Electron_eta,
-                        const std::vector<Float_t>& Electron_mass,
-                        const std::vector<Float_t>& Electron_phi,
-                        const std::vector<Float_t>& Electron_pt,
-                        Int_t&   charge_out, Float_t& dxy_out,  Float_t& dz_out,
-                        Float_t& eta_out,    Float_t& mass_out,
-                        Float_t& phi_out,    Float_t& pt_out) {
-    charge_out = Electron_charge[idx];
-    dxy_out    = Electron_dxy[idx];
-    dz_out     = Electron_dz[idx];
-    eta_out    = Electron_eta[idx];
-    mass_out   = Electron_mass[idx];
-    phi_out    = Electron_phi[idx];
-    pt_out     = Electron_pt[idx];
+RNode define_mumu_columns(RNode df) {
+    return df
+        // First muon
+        .Define("Muon_charge_st", [](const RVec<Int_t>&   v){ return v[0]; }, {"Muon_charge"})
+        .Define("Muon_dxy_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_dxy"})
+        .Define("Muon_dz_st",     [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_dz"})
+        .Define("Muon_eta_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_eta"})
+        .Define("Muon_mass_st",   [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_mass"})
+        .Define("Muon_phi_st",    [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_phi"})
+        .Define("Muon_pt_st",     [](const RVec<Float_t>& v){ return v[0]; }, {"Muon_pt"})
+        // Second muon
+        .Define("Muon_charge_nd", [](const RVec<Int_t>&   v){ return v[1]; }, {"Muon_charge"})
+        .Define("Muon_dxy_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_dxy"})
+        .Define("Muon_dz_nd",     [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_dz"})
+        .Define("Muon_eta_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_eta"})
+        .Define("Muon_mass_nd",   [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_mass"})
+        .Define("Muon_phi_nd",    [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_phi"})
+        .Define("Muon_pt_nd",     [](const RVec<Float_t>& v){ return v[1]; }, {"Muon_pt"})
+        // Empty electrons
+        .Define("Electron_charge_st", []{ return Int_t{0}; })
+        .Define("Electron_charge_nd", []{ return Int_t{0}; })
+        .Define("Electron_dxy_st",    []{ return Float_t{0}; })
+        .Define("Electron_dxy_nd",    []{ return Float_t{0}; })
+        .Define("Electron_dz_st",     []{ return Float_t{0}; })
+        .Define("Electron_dz_nd",     []{ return Float_t{0}; })
+        .Define("Electron_eta_st",    []{ return Float_t{0}; })
+        .Define("Electron_eta_nd",    []{ return Float_t{0}; })
+        .Define("Electron_mass_st",   []{ return Float_t{0}; })
+        .Define("Electron_mass_nd",   []{ return Float_t{0}; })
+        .Define("Electron_phi_st",    []{ return Float_t{0}; })
+        .Define("Electron_phi_nd",    []{ return Float_t{0}; })
+        .Define("Electron_pt_st",     []{ return Float_t{0}; })
+        .Define("Electron_pt_nd",     []{ return Float_t{0}; });
 }
-
-void muon_variables(int idx,
-                    const std::vector<Int_t>&   Muon_charge,
-                    const std::vector<Float_t>& Muon_dxy,
-                    const std::vector<Float_t>& Muon_dz,
-                    const std::vector<Float_t>& Muon_eta,
-                    const std::vector<Float_t>& Muon_mass,
-                    const std::vector<Float_t>& Muon_phi,
-                    const std::vector<Float_t>& Muon_pt,
-                    Int_t&   charge_out, Float_t& dxy_out,  Float_t& dz_out,
-                    Float_t& eta_out,    Float_t& mass_out,
-                    Float_t& phi_out,    Float_t& pt_out) {
-    charge_out = Muon_charge[idx];
-    dxy_out    = Muon_dxy[idx];
-    dz_out     = Muon_dz[idx];
-    eta_out    = Muon_eta[idx];
-    mass_out   = Muon_mass[idx];
-    phi_out    = Muon_phi[idx];
-    pt_out     = Muon_pt[idx];
-}
-
-void empty_electron_variables(Int_t& charge_st, Int_t& charge_nd,
-                               Float_t& dxy_st, Float_t& dxy_nd,
-                               Float_t& dz_st,  Float_t& dz_nd,
-                               Float_t& eta_st, Float_t& eta_nd,
-                               Float_t& mass_st,Float_t& mass_nd,
-                               Float_t& phi_st, Float_t& phi_nd,
-                               Float_t& pt_st,  Float_t& pt_nd) {
-    charge_st = 0; charge_nd = 0;
-    dxy_st    = 0; dxy_nd    = 0;
-    dz_st     = 0; dz_nd     = 0;
-    eta_st    = 0; eta_nd    = 0;
-    mass_st   = 0; mass_nd   = 0;
-    phi_st    = 0; phi_nd    = 0;
-    pt_st     = 0; pt_nd     = 0;
-}
-
-void empty_muon_variables(Int_t& charge_st, Int_t& charge_nd,
-                           Float_t& dxy_st, Float_t& dxy_nd,
-                           Float_t& dz_st,  Float_t& dz_nd,
-                           Float_t& eta_st, Float_t& eta_nd,
-                           Float_t& mass_st,Float_t& mass_nd,
-                           Float_t& phi_st, Float_t& phi_nd,
-                           Float_t& pt_st,  Float_t& pt_nd) {
-    charge_st = 0; charge_nd = 0;
-    dxy_st    = 0; dxy_nd    = 0;
-    dz_st     = 0; dz_nd     = 0;
-    eta_st    = 0; eta_nd    = 0;
-    mass_st   = 0; mass_nd   = 0;
-    phi_st    = 0; phi_nd    = 0;
-    pt_st     = 0; pt_nd     = 0;
-}
-
 
 
 /**
  * @brief Main.
  */
 void preparation_ZZTo2L2Nu() {
-    /**
-     * @brief Selects the TTree 'Events' from CMS Open Data file.
-     */
-    auto chain = std::make_unique<TChain>("Events");
-
-    chain->Add("../OriginalDatasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
-
-
 
     /**
-     * @param n_events Number of events in each file.
+     * @brief Builds the RDataFrame.
      */
-    Long64_t n_events = chain->GetEntries();
-
-    std::cout << "nEvents before skimming:" << n_events << std::endl;
-
-
+    ROOT::RDataFrame df("Events",
+        "../OriginalDatasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
 
     /**
-     * @brief Sets up the single value input branches.
+     * @brief Prints the dataset stats.
      */
-    Branches branches;
-    branches.setup_branches(chain.get());
-    
-
+    print_stats(df);
 
     /**
-     * @brief Gets the maximum number of leptons.
+     * @brief Saves the single value input Branches.
      */
-    auto max = getMaxLeptons(chain.get(), n_events,
-                                    branches.nElectron, branches.nMuon);
-
-    std::cout << "Max nElectron: " << max.nElectron  << std::endl;
-    std::cout << "Max nMuon: " << max.nMuon << std::endl;
-
-
+    const std::vector<std::string> scalar_cols = {
+        "nElectron", "nMuon",
+        "MET_pt", "MET_phi", "MET_covXX", "MET_covXY", "MET_covYY",
+        "MET_significance", "GenMET_pt",
+        "PV_chi2", "PV_score", "PV_x", "PV_y", "PV_z",
+        "nSV"
+    };
 
     /**
-     * @brief Calculates GenMET_pt mean and standard deviation.
+     * @brief Saves the new output Branches.
      */
-    auto [GenMET_mean, GenMET_std] = computeMeanAndStdGenMET(chain.get(), n_events, branches.GenMET_pt);
-
-    std::cout << "Mean GenMET_pt: " << GenMET_mean << std::endl;
-    std::cout << "Standard deviation GenMET_pt: " << GenMET_std << std::endl;
-
-
-
-    /**
-     * @brief Defines variables for Branches with variable arrays:
-     * - unpacks static arrays;
-     * - sets the Branch status to 1;
-     * - associates the address of the Branch.
-     */
-
-    // Variables
-    std::vector<Float_t> Electron_dxy(max.nElectron);
-    std::vector<Float_t> Electron_dz(max.nElectron);
-    std::vector<Float_t> Electron_eta(max.nElectron);
-    std::vector<Float_t> Electron_mass(max.nElectron);
-    std::vector<Float_t> Electron_phi(max.nElectron);
-    std::vector<Float_t> Electron_pt(max.nElectron);
-    std::vector<Int_t> Electron_charge(max.nElectron);
-
-    std::vector<Float_t> Muon_dxy(max.nMuon);
-    std::vector<Float_t> Muon_dz(max.nMuon);
-    std::vector<Float_t> Muon_eta(max.nMuon);
-    std::vector<Float_t> Muon_mass(max.nMuon);
-    std::vector<Float_t> Muon_phi(max.nMuon);
-    std::vector<Float_t> Muon_pt(max.nMuon);
-    std::vector<Int_t> Muon_charge(max.nMuon);
-    
-    // Variables status
-    chain->SetBranchStatus("Electron_dxy", 1);
-    chain->SetBranchStatus("Electron_dz", 1);
-    chain->SetBranchStatus("Electron_eta", 1);
-    chain->SetBranchStatus("Electron_mass", 1);
-    chain->SetBranchStatus("Electron_phi", 1);
-    chain->SetBranchStatus("Electron_pt", 1);
-    chain->SetBranchStatus("Electron_charge", 1);
-
-    chain->SetBranchStatus("Muon_dxy", 1);
-    chain->SetBranchStatus("Muon_dz", 1);
-    chain->SetBranchStatus("Muon_eta", 1);
-    chain->SetBranchStatus("Muon_mass", 1);
-    chain->SetBranchStatus("Muon_phi", 1);
-    chain->SetBranchStatus("Muon_pt", 1);
-    chain->SetBranchStatus("Muon_charge", 1);
-
-    // Variable address
-    chain->SetBranchAddress("Electron_dxy", Electron_dxy.data());
-    chain->SetBranchAddress("Electron_dz", Electron_dz.data());
-    chain->SetBranchAddress("Electron_eta", Electron_eta.data());
-    chain->SetBranchAddress("Electron_mass", Electron_mass.data());
-    chain->SetBranchAddress("Electron_phi", Electron_phi.data());
-    chain->SetBranchAddress("Electron_pt", Electron_pt.data());
-    chain->SetBranchAddress("Electron_charge", Electron_charge.data());
-
-    chain->SetBranchAddress("Muon_dxy", Muon_dxy.data());
-    chain->SetBranchAddress("Muon_dz", Muon_dz.data());
-    chain->SetBranchAddress("Muon_eta", Muon_eta.data());
-    chain->SetBranchAddress("Muon_mass", Muon_mass.data());
-    chain->SetBranchAddress("Muon_phi", Muon_phi.data());
-    chain->SetBranchAddress("Muon_pt", Muon_pt.data());
-    chain->SetBranchAddress("Muon_charge", Muon_charge.data());
-
-
-
-    /**
-     * @brief Clone full TTree structure (not the content).
-     */
-    TTree *newtree = chain->CloneTree(0);
+    const std::vector<std::string> lepton_cols = {
+        "Electron_charge_st", "Electron_charge_nd",
+        "Electron_dxy_st",    "Electron_dxy_nd",
+        "Electron_dz_st",     "Electron_dz_nd",
+        "Electron_eta_st",    "Electron_eta_nd",
+        "Electron_mass_st",   "Electron_mass_nd",
+        "Electron_phi_st",    "Electron_phi_nd",
+        "Electron_pt_st",     "Electron_pt_nd",
+        "Muon_charge_st",     "Muon_charge_nd",
+        "Muon_dxy_st",        "Muon_dxy_nd",
+        "Muon_dz_st",         "Muon_dz_nd",
+        "Muon_eta_st",        "Muon_eta_nd",
+        "Muon_mass_st",       "Muon_mass_nd",
+        "Muon_phi_st",        "Muon_phi_nd",
+        "Muon_pt_st",         "Muon_pt_nd"
+    };
 
     
-
     /**
-     * @brief Defines the output branches.
+     * @brief Merges scalar and leptons columns.
      */
-    Int_t Electron_charge_st, Electron_charge_nd;
-    Float_t Electron_dxy_st, Electron_dxy_nd;
-    Float_t Electron_dz_st, Electron_dz_nd;
-    Float_t Electron_eta_st, Electron_eta_nd;
-    Float_t Electron_mass_st, Electron_mass_nd;
-    Float_t Electron_phi_st, Electron_phi_nd;
-    Float_t Electron_pt_st, Electron_pt_nd;
+    std::vector<std::string> output_cols = scalar_cols;
+    output_cols.insert(output_cols.end(), lepton_cols.begin(), lepton_cols.end());
 
-    Int_t Muon_charge_st, Muon_charge_nd;
-    Float_t Muon_dxy_st, Muon_dxy_nd;
-    Float_t Muon_dz_st, Muon_dz_nd;
-    Float_t Muon_eta_st, Muon_eta_nd;
-    Float_t Muon_mass_st, Muon_mass_nd;
-    Float_t Muon_phi_st, Muon_phi_nd;
-    Float_t Muon_pt_st, Muon_pt_nd;
+    // ee channel
+    auto df_ee = define_ee_columns(
+        df.Filter("nElectron == 2 && nMuon == 0", "2e + 0mu")
+    );
+    auto df_ee_clean = df_ee
+        .Filter([](Float_t m1, Float_t m2){ return m1 >= 0.f && m2 >= 0.f; },
+                {"Electron_mass_st", "Electron_mass_nd"},
+                "Electron mass >= 0")
+        .Filter("MET_pt >= 0", "MET_pt >= 0")
+        .Filter("Electron_pt_st > 0 && Electron_pt_nd > 0", "Electron pt > 0");
+
+    // mumu channel
+    auto df_mumu = define_mumu_columns(
+        df.Filter("nMuon == 2 && nElectron == 0", "0e + 2mu")
+    );
+    auto df_mumu_clean = df_mumu
+        .Filter([](Float_t m1, Float_t m2){ return m1 >= 0.f && m2 >= 0.f; },
+                {"Muon_mass_st", "Muon_mass_nd"},
+                "Muon mass >= 0")
+        .Filter("MET_pt >= 0", "MET_pt >= 0")
+        .Filter("Muon_pt_st > 0 && Muon_pt_nd > 0", "Muon pt > 0");
+
     
-    // First electron
-    newtree->Branch("Electron_charge_st", &Electron_charge_st);
-    newtree->Branch("Electron_dxy_st", &Electron_dxy_st);
-    newtree->Branch("Electron_dz_st", &Electron_dz_st);
-    newtree->Branch("Electron_eta_st", &Electron_eta_st);
-    newtree->Branch("Electron_mass_st", &Electron_mass_st);
-    newtree->Branch("Electron_phi_st", &Electron_phi_st);
-    newtree->Branch("Electron_pt_st", &Electron_pt_st);
-
-    // Second electron
-    newtree->Branch("Electron_charge_nd", &Electron_charge_nd);
-    newtree->Branch("Electron_dxy_nd", &Electron_dxy_nd);
-    newtree->Branch("Electron_dz_nd", &Electron_dz_nd);
-    newtree->Branch("Electron_eta_nd", &Electron_eta_nd);
-    newtree->Branch("Electron_mass_nd", &Electron_mass_nd);
-    newtree->Branch("Electron_phi_nd", &Electron_phi_nd);
-    newtree->Branch("Electron_pt_nd", &Electron_pt_nd);
-
-    // First muon
-    newtree->Branch("Muon_charge_st", &Muon_charge_st);
-    newtree->Branch("Muon_dxy_st", &Muon_dxy_st);
-    newtree->Branch("Muon_dz_st", &Muon_dz_st);
-    newtree->Branch("Muon_eta_st", &Muon_eta_st);
-    newtree->Branch("Muon_mass_st", &Muon_mass_st);
-    newtree->Branch("Muon_phi_st", &Muon_phi_st);
-    newtree->Branch("Muon_pt_st", &Muon_pt_st);
-    
-    // Second muon
-    newtree->Branch("Muon_charge_nd", &Muon_charge_nd);
-    newtree->Branch("Muon_dxy_nd", &Muon_dxy_nd);
-    newtree->Branch("Muon_dz_nd", &Muon_dz_nd);
-    newtree->Branch("Muon_eta_nd", &Muon_eta_nd);
-    newtree->Branch("Muon_mass_nd", &Muon_mass_nd);
-    newtree->Branch("Muon_phi_nd", &Muon_phi_nd);
-    newtree->Branch("Muon_pt_nd", &Muon_pt_nd);
-    
-    Long64_t n_events_skimmed = 0;
-
-    for (Long64_t i = 0; i < n_events; i++) {
-        chain->GetEntry(i);
-        
-        if (branches.nElectron == 2 && branches.nMuon == 0) {
-            electron_variables(0, Electron_charge, Electron_dxy, Electron_dz,
-                               Electron_eta, Electron_mass, Electron_phi, Electron_pt,
-                               Electron_charge_st, Electron_dxy_st, Electron_dz_st,
-                               Electron_eta_st, Electron_mass_st, Electron_phi_st, Electron_pt_st);
-            electron_variables(1, Electron_charge, Electron_dxy, Electron_dz,
-                               Electron_eta, Electron_mass, Electron_phi, Electron_pt,
-                               Electron_charge_nd, Electron_dxy_nd, Electron_dz_nd,
-                               Electron_eta_nd, Electron_mass_nd, Electron_phi_nd, Electron_pt_nd);
-            empty_muon_variables(Muon_charge_st, Muon_charge_nd,
-                                 Muon_dxy_st, Muon_dxy_nd, Muon_dz_st, Muon_dz_nd,
-                                 Muon_eta_st, Muon_eta_nd, Muon_mass_st, Muon_mass_nd,
-                                 Muon_phi_st, Muon_phi_nd, Muon_pt_st, Muon_pt_nd);
-            // Fill Tree with new entries
-            newtree->Fill();
-            // Keep track of events
-            n_events_skimmed++;
-        }
-        else if (branches.nMuon == 2 && branches.nElectron == 0) {
-            muon_variables(0, Muon_charge, Muon_dxy, Muon_dz,
-                           Muon_eta, Muon_mass, Muon_phi, Muon_pt,
-                           Muon_charge_st, Muon_dxy_st, Muon_dz_st,
-                           Muon_eta_st, Muon_mass_st, Muon_phi_st, Muon_pt_st);
-            muon_variables(1, Muon_charge, Muon_dxy, Muon_dz,
-                           Muon_eta, Muon_mass, Muon_phi, Muon_pt,
-                           Muon_charge_nd, Muon_dxy_nd, Muon_dz_nd,
-                           Muon_eta_nd, Muon_mass_nd, Muon_phi_nd, Muon_pt_nd);
-            empty_electron_variables(Electron_charge_st, Electron_charge_nd,
-                                     Electron_dxy_st, Electron_dxy_nd, Electron_dz_st, Electron_dz_nd,
-                                     Electron_eta_st, Electron_eta_nd, Electron_mass_st, Electron_mass_nd,
-                                     Electron_phi_st, Electron_phi_nd, Electron_pt_st, Electron_pt_nd);
-
-            newtree->Fill();
-            n_events_skimmed++;
-        }
-    }
-
-
-
     /**
-     * @brief Number of events remaining after the skimming.
+     * @brief Snapshots the results of the skimming.
      */
-    std::cout << "Remaining events after skimming: " << n_events_skimmed << std::endl;
+    const std::string outfile = "../CleanedDatasets/cleaned_ZZTo2L2Nu.root";
 
-    /**
-     * @brief Creates blank new file to collect skimmed data.
-     * If already existent, it recreates it.
-     */
-    auto skimfile = std::make_unique<TFile>("../CleanedDatasets/cleaned_ZZTo2L2Nu.root", "RECREATE");
+    // Writes the channels on two temporary separate files
+    df_ee_clean.Snapshot("Events", "tmp_ee.root", output_cols);
+    df_mumu_clean.Snapshot("Events", "tmp_mumu.root", output_cols);
 
-    /**
-     * @brief Writes the new tree than closes the new file.
-     */
-    newtree->Write();
-    skimfile->Close();
+    // Merges the two temporary files
+    TChain merged("Events");
+    merged.Add("tmp_ee.root");
+    merged.Add("tmp_mumu.root");
+    merged.Merge(outfile.c_str());
+
+    // Temporary files removal
+    if (std::remove("tmp_ee.root") != 0)
+        std::cerr << "Warning: cannot remove tmp_ee.root\n";
+    if (std::remove("tmp_mumu.root") != 0)
+        std::cerr << "Warning: cannot remove tmp_mumu.root\n";
+
+    // Final report
+    std::cout << "\n    Dataset preparation report    \n";
+    df.Report()->Print();
 }
-
