@@ -180,7 +180,8 @@ void preparation_ZZTo2L2Nu() {
                 {"Electron_mass_st", "Electron_mass_nd"},
                 "Electron mass >= 0")
         .Filter("MET_pt >= 0", "MET_pt >= 0")
-        .Filter("Electron_pt_st > 0 && Electron_pt_nd > 0", "Electron pt > 0");
+        .Filter("Electron_pt_st > 0 && Electron_pt_nd > 0", "Electron pt > 0")
+        .Filter("Electron_charge_st + Electron_charge_nd == 0", "OS electron pair");
 
     // mumu channel
     auto df_mumu = define_mumu_columns(
@@ -191,7 +192,8 @@ void preparation_ZZTo2L2Nu() {
                 {"Muon_mass_st", "Muon_mass_nd"},
                 "Muon mass >= 0")
         .Filter("MET_pt >= 0", "MET_pt >= 0")
-        .Filter("Muon_pt_st > 0 && Muon_pt_nd > 0", "Muon pt > 0");
+        .Filter("Muon_pt_st > 0 && Muon_pt_nd > 0", "Muon pt > 0")
+        .Filter("Muon_charge_st + Muon_charge_nd == 0", "OS muon pair");
 
     
     /**

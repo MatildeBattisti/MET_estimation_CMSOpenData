@@ -270,7 +270,9 @@ void preparation_HToAATo2Mu2B() {
                     return b1 > btag_threshold && b2 > btag_threshold; },
                 {"Jet_btag_bst", "Jet_btag_bnd"}, "btag threshold")
         .Filter("Jet_pt_bst > 0 && Jet_pt_bnd > 0", "Jet pt > 0")
-        .Filter("Muon_pt_st > 0 && Muon_pt_nd > 0", "Muon pt > 0");
+        .Filter("Muon_pt_st > 0 && Muon_pt_nd > 0", "Muon pt > 0")
+        .Filter([](const RVec<Int_t>& charge){ return charge[0] + charge[1] == 0; },
+        {"Muon_charge"}, "OS muon pair");
 
     /**
      * @brief Feature engineering.
