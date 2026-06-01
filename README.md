@@ -12,7 +12,6 @@ pip3 install -r requirements.txt
 
 > **Note:** By default, the CPU version of TensorFlow is installed. If you have an NVIDIA GPU, you can enable GPU support by replacing `tensorflow` with `tensorflow[and-cuda]` in `requirements.txt` before installing.
 
-
 ## Background
 
 **Missing Transverse Energy (MET)** is a key observable in collider physics. It quantifies the momentum imbalance in the transverse plane of a collision event, and is typically associated with the presence of particles that escape detection, such as neutrinos.
@@ -42,24 +41,30 @@ The `data_preparation/` folder contains the files used to clean and filter the r
 
 Each cleaned dataset was passed to a Keras neural network model tailored to the respective process, with the goal of estimating MET from the remaining features.
 
-The models share some features such as:
-- the dataset is divided in two parts: 80% is used for training the net while the remaining 20% is aimed at testing. They are kept separate at all times to void data leakage;
-- model selection is performed with a grid search over a 3-fold Cross Validation on the training set. During this phase, the training over the folds is interrupted by early stopping triggered by the validation loss;
-- a retraining is performed over the whole dataset using the best hyperparameters found during the grid search. During this phase, we perform an epoch matching: the retraining stops when the average training loss found in the model selection for the same parameters is reached. This method allows the model to use all the avaiable training data and balances the otherwise resulting underfitting that we would get by retraining a model that was before trained over single folds.
+The models share the following pipeline:
+- the dataset is split into two non-overlapping partitions, 80% for training and 20% for testing, kept strictly separate throughout the entire process to prevent data leakage;
+- hyperparameter selection is performed via grid search over 3-fold cross-validation on the training set. During this phase, training on each fold is interrupted by early stopping triggered by the validation loss;
+- after identifying the best hyperparameters, a retraining is performed on the full training set. To avoid the underfitting that would otherwise arise from training on individual folds, we apply epoch matching: retraining stops once the average training loss achieved during model selection (for the same hyperparameters) is reached, allowing the model to fully exploit all available training data.
 
-The main difference between the two datasets is that for the HToAATo2Mu2B we use as target the log value of the GenMET because it has a skewed distribution and we noticed that the model struggled with learning this configuration.
+The main difference between the two datasets concerns the target variable: for the HToAATo2Mu2B process, the model is trained on the log-transformed GenMET rather than the raw value, since the original distribution is heavily skewed and the network showed poorer convergence without this transformation.
 
-### Results
+### Results (`results/`)
 
-All the results of the run are saved in the `results/` folder. Specifically, we save:
-- a run summary of each dataset;
-- both the learning curves of the model selection for the best hyperparameters and the learning curve of the retraining;
-- the best 10 hyperparameters configurations found during the grid search;
-- the predicted data together with the testing data;
-- shap results to determine the feature importance.
+All outputs from each run are saved in the results/ folder, organized as follows:
 
-In the notebook is then reported an evaluation on the performance of the model over each dataset.
+a summary of the run for each dataset;
+the learning curves from model selection (for the best hyperparameter configuration) and from the retraining phase;
+the top 10 hyperparameter configurations found during the grid search;
+the model predictions alongside the corresponding test set targets;
+SHAP values for feature importance analysis.
 
+A full evaluation of model performance on each dataset is reported directly in the notebook.
 
+## View the notebooks
+GitHub may fail to render the notebooks due to their size. Open them directly on `Google Colab`:
 
-
+| Notebook | Open |
+|----------|------|
+| Data Understanding | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_understanding/data_understanding.ipynb) |
+| Data Preparation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_preparation/data_preparation.ipynb) |
+| Results | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/Results/results.ipynb) |
