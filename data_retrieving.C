@@ -43,7 +43,7 @@ void data_retrieving() {
         exit(-1);
     }
 
-    tree->Show(-1);
+    tree->Show(1);
 
 
 
