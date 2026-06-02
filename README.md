@@ -50,13 +50,13 @@ The main difference between the two datasets concerns the target variable: for t
 
 ### Results (`results/`)
 
-All outputs from each run are saved in the results/ folder, organized as follows:
+All outputs from each run are saved in the `results/` folder, organized as follows:
 
-a summary of the run for each dataset;
-the learning curves from model selection (for the best hyperparameter configuration) and from the retraining phase;
-the top 10 hyperparameter configurations found during the grid search;
-the model predictions alongside the corresponding test set targets;
-SHAP values for feature importance analysis.
+- a summary of the run for each dataset;
+- the learning curves from model selection (for the best hyperparameter configuration) and from the retraining phase;
+- the top 10 hyperparameter configurations found during the grid search;
+- the model predictions alongside the corresponding test set targets;
+- SHAP values for feature importance analysis.
 
 A full evaluation of model performance on each dataset is reported directly in the notebook.
 

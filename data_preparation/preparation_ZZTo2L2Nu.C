@@ -38,7 +38,7 @@ void print_stats(ROOT::RDataFrame& df) {
 /**
  * @brief Helper function for the event loop.
  * Adds the electrons columns to the node while keeping the muons columns
- * empty (2e + 0mu) channel.
+ * empty: (2e + 0mu) channel.
  */
 RNode define_ee_columns(RNode df) {
     return df
@@ -79,7 +79,7 @@ RNode define_ee_columns(RNode df) {
 /**
  * @brief Helper function for the event loop.
  * Adds the muons columns to the node while keeping the electrons columns
- * empty (0e + 2mu) channel.
+ * empty: (0e + 2mu) channel.
  */
 RNode define_mumu_columns(RNode df) {
     return df

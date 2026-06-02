@@ -27,14 +27,14 @@ void print_stats(ROOT::RDataFrame& df) {
     auto n_tot         = df.Count();
     auto max_njet      = df.Max<UInt_t>("nJet");
     auto max_nmuon     = df.Max<UInt_t>("nMuon");
-    auto max_nsv       = df.Max<UInt_t>("nSV");
+    auto max_nSV       = df.Max<UInt_t>("nSV");
     auto mean_genmet   = df.Mean<Float_t>("GenMET_pt");
     auto stddev_genmet = df.StdDev<Float_t>("GenMET_pt");
 
     std::cout << "nEvents before skimming:  " << *n_tot         << "\n"
               << "Max nJet:                 " << *max_njet      << "\n"
               << "Max nMuon:                " << *max_nmuon     << "\n"
-              << "Max nSV:                  " << *max_nsv       << "\n"
+              << "Max nSV:                  " << *max_nSV       << "\n"
               << "Mean GenMET_pt:           " << *mean_genmet   << "\n"
               << "StdDev GenMET_pt:         " << *stddev_genmet << "\n";
 }
@@ -72,7 +72,6 @@ Float_t deltaPhi(Float_t phi1, Float_t phi2) {
  * according to the highest btag score.
  */
 RNode define_jet_columns(RNode df) {
-
     // Computes the two indices
     df = df.Define("_btag_indices",
         [](const RVec<Float_t>& btag) -> RVec<Int_t> {
@@ -88,7 +87,7 @@ RNode define_jet_columns(RNode df) {
             { return b[idx[1]]; }, {"Jet_btagDeepFlavB", "_btag_indices"});
 
     // Assigns all other jet properties
-    auto def_jet = [&](RNode n,
+    auto def_jet = [](RNode n,
                        const std::string& prop,
                        const std::string& branch) -> RNode {
         return n
