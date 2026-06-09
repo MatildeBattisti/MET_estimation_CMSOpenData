@@ -84,7 +84,7 @@ void skimming_data_understanding() {
      */
     auto chain = std::make_unique<TChain>("Events");
 
-    chain->Add("../OriginalDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
+    chain->Add("../OriginalDatasets/HToAATo2Mu2B/augmented_HToAATo2Mu2B.root");
 
 
 
@@ -109,7 +109,7 @@ void skimming_data_understanding() {
      * @brief Creates blank new file to collect skimmed data.
      * If already existent, it recreates it.
      */
-    auto skimfile = std::make_unique<TFile>("../SkimmedDatasets/skimmed_HToAATo2Mu2B.root", "RECREATE");
+    auto skimfile = std::make_unique<TFile>("../SkimmedDatasets/skimmed_augmented_HToAATo2Mu2B.root", "RECREATE");
 
 
 

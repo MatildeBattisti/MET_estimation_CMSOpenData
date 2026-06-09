@@ -238,7 +238,7 @@ void preparation_HToAATo2Mu2B() {
      * @brief Builds the RDataFrame.
      */
     ROOT::RDataFrame df("Events",
-        "../OriginalDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
+        "../OriginalDatasets/HToAATo2Mu2B/augmented_HToAATo2Mu2B.root");
 
     /**
      * @brief Prints the dataset stats.
@@ -310,7 +310,7 @@ void preparation_HToAATo2Mu2B() {
     /**
      * @brief Snapshots the results of the skimming.
      */
-    const std::string outfile = "../CleanedDatasets/cleaned_HToAATo2Mu2B.root";
+    const std::string outfile = "../CleanedDatasets/cleaned_augmented_HToAATo2Mu2B.root";
     df_def.Snapshot("Events", outfile, output_cols);
 
     // Final report
