@@ -12,6 +12,15 @@ pip3 install -r requirements.txt
 
 > **Note:** By default, the CPU version of TensorFlow is installed. If you have an NVIDIA GPU, you can enable GPU support by replacing `tensorflow` with `tensorflow[and-cuda]` in `requirements.txt` before installing.
 
+## View the notebooks
+GitHub may fail to render the notebooks due to their size. Open them directly on `Google Colab`:
+
+| Notebook | Open |
+|----------|------|
+| Data Understanding | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_understanding/data_understanding.ipynb) |
+| Data Preparation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_preparation/data_preparation.ipynb) |
+| Results | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/Results/results.ipynb) |
+
 ## Background
 
 **Missing Transverse Energy (MET)** is a key observable in collider physics. It quantifies the momentum imbalance in the transverse plane of a collision event, and is typically associated with the presence of particles that escape detection, such as neutrinos.
@@ -48,9 +57,9 @@ The models share the following pipeline:
 
 The main difference between the two datasets concerns the target variable: for the HToAATo2Mu2B process, the model is trained on the log-transformed GenMET rather than the raw value, since the original distribution is heavily skewed and the network showed poorer convergence without this transformation.
 
-### Results (`results/`)
+### Results (`Results/`)
 
-All outputs from each run are saved in the `results/` folder, organized as follows:
+All outputs from each run are saved in the `Results/` folder, organized as follows:
 
 - a summary of the run for each dataset;
 - the learning curves from model selection (for the best hyperparameter configuration) and from the retraining phase;
@@ -59,12 +68,3 @@ All outputs from each run are saved in the `results/` folder, organized as follo
 - SHAP values for feature importance analysis.
 
 A full evaluation of model performance on each dataset is reported directly in the notebook.
-
-## View the notebooks
-GitHub may fail to render the notebooks due to their size. Open them directly on `Google Colab`:
-
-| Notebook | Open |
-|----------|------|
-| Data Understanding | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_understanding/data_understanding.ipynb) |
-| Data Preparation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_preparation/data_preparation.ipynb) |
-| Results | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/Results/results.ipynb) |

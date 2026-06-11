@@ -123,7 +123,6 @@ def _standardize(x_tr: np.ndarray, x_val: np.ndarray):
     return x_tr_scaled, x_val_scaled, mean, std
 
 
-# CHECK IF, WHEN NOT USED, THE SHUFFLE IS DONE ANYWAY
 def _build_tensorflow_dataset(X: np.ndarray, y: np.ndarray, batch_size: int,
                      shuffle: bool = True) -> tf.data.Dataset:
     """

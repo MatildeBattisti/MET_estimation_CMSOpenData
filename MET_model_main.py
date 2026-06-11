@@ -9,6 +9,16 @@ from MET_model_utils import (
 
 # Branch configuration per dataset
 BRANCH_MAP = {
+    "ZZTo2L2Nu": [
+        "GenMET_pt", "MET_covXX", "MET_covXY", "MET_pt", "MET_significance",
+        "PV_z", "PV_chi2", "PV_score",
+        "Electron_dxy_st", "Electron_dz_st", "Electron_eta_st", "Electron_phi_st", "Electron_pt_st",
+        "Electron_dxy_nd", "Electron_dz_nd", "Electron_eta_nd", "Electron_phi_nd", "Electron_pt_nd",
+        "Muon_dxy_st", "Muon_dz_st", "Muon_eta_st", "Muon_phi_st", "Muon_pt_st",
+        "Muon_dxy_nd", "Muon_dz_nd", "Muon_eta_nd", "Muon_phi_nd", "Muon_pt_nd",
+        "nElectron", "nMuon", "nSV",
+        "Electron_charge_st", "Electron_charge_nd", "Muon_charge_st", "Muon_charge_nd"
+    ],
     "HToAATo2Mu2B": [
         "GenMET_pt", "MET_covXX", "MET_covXY", "MET_pt", "MET_significance",
         "fixedGridRhoFastjetAll", "PV_z", "PV_chi2", "PV_score",
@@ -19,15 +29,15 @@ BRANCH_MAP = {
         "MET_projection_par", "MET_projection_perp", "dPhi_MET_mu1", "dPhi_MET_jet1", "HT",
         "nJet", "nMuon", "nSV", "Muon_charge_st", "Muon_charge_nd"
     ],
-    "ZZTo2L2Nu": [
-        "GenMET_pt", "MET_covXX", "MET_covXY", "MET_pt", "MET_significance",
-        "PV_z", "PV_chi2", "PV_score",
-        "Electron_dxy_st", "Electron_dz_st", "Electron_eta_st", "Electron_phi_st", "Electron_pt_st",
-        "Electron_dxy_nd", "Electron_dz_nd", "Electron_eta_nd", "Electron_phi_nd", "Electron_pt_nd",
-        "Muon_dxy_st", "Muon_dz_st", "Muon_eta_st", "Muon_phi_st", "Muon_pt_st",
-        "Muon_dxy_nd", "Muon_dz_nd", "Muon_eta_nd", "Muon_phi_nd", "Muon_pt_nd",
-        "nElectron", "nMuon", "nSV",
-        "Electron_charge_st", "Electron_charge_nd", "Muon_charge_st", "Muon_charge_nd"
+    "augmented_HToAATo2Mu2B": [
+        "GenMET_pt", "MET_covXX", "MET_pt",
+        "fixedGridRhoFastjetAll", "PV_z", "PV_score",
+        "Jet_eta_bst", "Jet_phi_bst", "Jet_rawFactor_bst", "Jet_chHEF_bst", "Jet_neHEF_bst",
+        "Jet_eta_bnd", "Jet_phi_bnd", "Jet_btag_bnd", "Jet_rawFactor_bnd", "Jet_chHEF_bnd", "Jet_neHEF_bnd",
+        "Muon_eta_st", "Muon_phi_st", "Muon_pt_st", "Muon_eta_nd", "Muon_phi_nd", "Muon_pt_nd",
+        "SV_mass_bst", "M_mumu", "M_bb", "M_mumu_bb", "dR_MET_bb",
+        "MET_projection_par", "MET_projection_perp", "dPhi_MET_mu1", "dPhi_MET_jet1", "HT",
+        "nJet", "nMuon", "nSV", "Muon_charge_st", "Muon_charge_nd"
     ],
 }
 
@@ -61,6 +71,26 @@ DATASET_CFG = {
         "n_folds":             3,
     },
     "HToAATo2Mu2B": {
+        # model
+        "clipnorm":            0.5,
+        "l2_reg":              1e-3,
+        # callbacks
+        "lr_patience":         10,
+        "es_patience_search":  60,
+        "rlrop_factor":        0.5,
+        "rlrop_min_delta":     1e-3,
+        "rlrop_min_lr":        1e-6,
+        # training loop
+        "max_epochs_search":   2000,
+        "max_epochs_retrain":  3000,
+        "target_transform":    "log1p",
+        # data split
+        "test_size":           0.2,
+        "random_seed_split":   42,
+        "random_seed_kfold":   42,
+        "n_folds":             3,
+    },
+    "augmented_HToAATo2Mu2B": {
         # model
         "clipnorm":            0.5,
         "l2_reg":              1e-3,
@@ -126,7 +156,15 @@ if __name__ == "__main__":
                 (64, 32),
             ],
             "batch_size":    [64, 128, 256],
-            "learning_rate": [1e-3, 5e-4, 1e-4, 5e-5]#, 1e-5] #1e-3, 5e-4
+            "learning_rate": [1e-3, 5e-4, 1e-4, 5e-5]#, 1e-5]
+        },
+        "augmented_HToAATo2Mu2B": {
+            "architecture": [
+                (32,), (64,), (128,),
+                (64, 32),
+            ],
+            "batch_size":    [64, 128, 256],
+            "learning_rate": [1e-3, 5e-4, 1e-4, 5e-5]#, 1e-5]
         },
     }
 
