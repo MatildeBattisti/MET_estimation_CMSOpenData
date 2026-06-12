@@ -13,15 +13,19 @@ void data_retrieving() {
      * @brief Open file from local path.
      * Returns an error if file is not opened.
      */
-    //TFile *file = TFile::Open("OriginalDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
-    TFile *file = TFile::Open("OriginalDatasets/HToAATo2Mu2B/merged_HToAATo2Mu2B.root");
-    //TFile *file = TFile::Open("/OriginalDdatasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
+    //TFile *file = TFile::Open("TestingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root");
+    //TFile *file = TFile::Open("TestingDatasets/ZZTo2L2Nu/0E4250DC-CAD4-FC48-85EE-90B2A761B6B0.root");
 
-    //TFile *file = TFile::Open("SkimmedDatasets/skimmed_HToAATo2Mu2B.root");
-    //TFile *file = TFile::Open("SkimmedDatasets/skimmed_ZZTo2L2Nu.root");
+    //TFile *file = TFile::Open("TrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root");
+    //TFile *file = TFile::Open("TrainingDatasets/ZZTo2L2Nu/DC33D4B8-4AF1-C94A-8F03-EDB634488D2B.root");
+
+    //TFile *file = TFile::Open("data_understanding/UnderstandingDatasets/understanding_DYJetsToLL.root");
+    //TFile *file = TFile::Open("data_understanding/UnderstandingDatasets/understanding_ZZTo2L2Nu.root");
 
     //TFile *file = TFile::Open("CleanedDatasets/cleaned_HToAATo2Mu2B.root");
     //TFile *file = TFile::Open("CleanedDatasets/cleaned_ZZTo2L2Nu.root");
+
+    TFile *file = TFile::Open("TrainingDataset/training.root");
 
     if (!file || file->IsZombie()) {
         std::cerr << "Error opening file." << std::endl;
@@ -44,7 +48,7 @@ void data_retrieving() {
         exit(-1);
     }
 
-    tree->Show(1);
+    tree->Show(5);
 
 
 

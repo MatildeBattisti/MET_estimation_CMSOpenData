@@ -1,78 +1,57 @@
-#include <TTree.h>
-#include <TChain.h>
-#include <TFile.h>
+/**
+ * @brief Takes only single value branches do perform data understanding
+ * over the different datasets.
+ */
+#include <ROOT/RDataFrame.hxx>
 #include <iostream>
-#include <memory>
-
+#include <string>
+#include <vector>
 
 
 /**
- * @brief Only selects entries that are relevant for the current dataset:
- * - the entries have name and type of the dataset Branches;
- * - the entries Branch status is set to one;
- * - gets the address of the Branches in order to copy their values.
+ * @brief List of single-value branches to keep in the skimmed dataset.
  */
-struct Branches {
-    // Input branches
-    Float_t MET_pt;
-    Float_t MET_phi;
-    Float_t MET_covXX;
-    Float_t MET_covXY;
-    Float_t MET_covYY;
-    Float_t MET_significance;
-    Float_t GenMET_pt;
-    Float_t PV_chi2;
-    Float_t PV_score;
-    Float_t PV_x;
-    Float_t PV_y;
-    Float_t PV_z;
-    UInt_t nSV;
-    UInt_t nElectron;
-    UInt_t nMuon;
-    UInt_t nJet;
-    UInt_t nGenJet;
-
-    void setup_branches(TChain* chain) {
-        chain->SetBranchStatus("*", 0);
-
-        chain->SetBranchStatus("MET_pt", 1);
-        chain->SetBranchStatus("MET_phi", 1);
-        chain->SetBranchStatus("MET_covXX", 1);
-        chain->SetBranchStatus("MET_covXY", 1);
-        chain->SetBranchStatus("MET_covYY", 1);
-        chain->SetBranchStatus("MET_significance", 1);
-        chain->SetBranchStatus("GenMET_pt", 1);
-        chain->SetBranchStatus("PV_chi2", 1);
-        chain->SetBranchStatus("PV_score", 1);
-        chain->SetBranchStatus("PV_x", 1);
-        chain->SetBranchStatus("PV_y", 1);
-        chain->SetBranchStatus("PV_z", 1);
-        chain->SetBranchStatus("nSV", 1);
-        chain->SetBranchStatus("nElectron", 1);
-        chain->SetBranchStatus("nMuon", 1);
-        chain->SetBranchStatus("nJet", 1);
-        chain->SetBranchStatus("nGenJet", 1);
-
-        chain->SetBranchAddress("MET_pt", &MET_pt);
-        chain->SetBranchAddress("MET_phi", &MET_phi);
-        chain->SetBranchAddress("MET_covXX", &MET_covXX);
-        chain->SetBranchAddress("MET_covXY", &MET_covXY);
-        chain->SetBranchAddress("MET_covYY", &MET_covYY);
-        chain->SetBranchAddress("MET_significance", &MET_significance);
-        chain->SetBranchAddress("GenMET_pt", &GenMET_pt);
-        chain->SetBranchAddress("PV_chi2", &PV_chi2);
-        chain->SetBranchAddress("PV_score", &PV_score);
-        chain->SetBranchAddress("PV_x", &PV_x);
-        chain->SetBranchAddress("PV_y", &PV_y);
-        chain->SetBranchAddress("PV_z", &PV_z);
-        chain->SetBranchAddress("nSV", &nSV);
-        chain->SetBranchAddress("nElectron", &nElectron);
-        chain->SetBranchAddress("nMuon", &nMuon);
-        chain->SetBranchAddress("nJet", &nJet);
-        chain->SetBranchAddress("nGenJet", &nJet);
-    }
+const std::vector<std::string> Branches = {
+    // target
+    "GenMET_pt",
+    // MET reconstructed
+    "MET_pt",
+    "MET_covXX",
+    "MET_covXY",
+    "MET_covYY",
+    "MET_phi",
+    "MET_significance",
+    "MET_sumEt",
+    "MET_sumPtUnclustered",
+    "MET_MetUnclustEnUpDeltaX",
+    "MET_MetUnclustEnUpDeltaY",
+    // Pileup info + generated Jets (only on MC simulations)
+    "Pileup_nTrueInt",
+    "Pileup_pudensity",
+    "Pileup_gpudensity",
+    "Pileup_nPU",
+    "Pileup_sumEOOT",
+    "Pileup_sumLOOT",
+    "nGenJet",
+    // Energy density
+    "fixedGridRhoFastjetAll",
+    "fixedGridRhoFastjetCentral",
+    "fixedGridRhoFastjetCentralCalo",
+    "fixedGridRhoFastjetCentralChargedPileUp",
+    "fixedGridRhoFastjetCentralNeutral",
+    // Primary vertex
+    "PV_ndof",
+    "PV_x",
+    "PV_y",
+    "PV_z",
+    "PV_chi2",
+    "PV_score",
+    "PV_npvs",
+    "PV_npvsGood",
+    // Object multiplicity
+    "nSV",
+    "nJet",
 };
-
 
 
 /**
@@ -80,49 +59,36 @@ struct Branches {
  */
 void skimming_data_understanding() {
     /**
-     * @brief Selects the TTree 'Events' from CMS Open Data file.
+     * @brief Enable implicit multi-threading for RDataFrame.
+     * Remove or set to 1 to disable parallelism.
      */
-    auto chain = std::make_unique<TChain>("Events");
-
-    chain->Add("../OriginalDatasets/HToAATo2Mu2B/augmented_HToAATo2Mu2B.root");
-
-
+    //ROOT::EnableImplicitMT();
 
     /**
-     * @param n_events Number of events in each file.
+     * @brief Build RDataFrame directly from the TChain-equivalent:
+     * - first argument is the TTree name
+     * - second is the input file (or a vector/glob of files for multiple inputs).
      */
-    Long64_t n_events = chain->GetEntries();
-
-    std::cout << "nEvents:" << n_events << std::endl;
-
-
+    ROOT::RDataFrame df(
+        "Events",
+        "../OriginalTrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root"
+    );
 
     /**
-     * @brief Sets up the single value input branches.
+     * @brief Print total number of events.
+     * Count() is a lazy action: it triggers the event loop only once,
+     * together with the Snapshot below.
      */
-    Branches branches;
-    branches.setup_branches(chain.get());
-    
-
+    auto n_events = df.Count();
 
     /**
-     * @brief Creates blank new file to collect skimmed data.
-     * If already existent, it recreates it.
+     * @brief Write the skimmed dataset.
+     * Snapshot selects only the branches in kKeepBranches and writes
+     * them to the output file. The event loop runs here.
      */
-    auto skimfile = std::make_unique<TFile>("../SkimmedDatasets/skimmed_augmented_HToAATo2Mu2B.root", "RECREATE");
+    df.Snapshot("Events",
+                "UnderstandingDatasets/understanding_DYJetsToLL.root",
+                Branches);
 
-
-
-    /**
-     * @brief Clone full TTree structure (not the content).
-     */
-    TTree *newtree = chain->CloneTree();
-    
-
-
-    /**
-     * @brief Writes the new tree than closes the new file.
-     */
-    newtree->Write();
-    skimfile->Close();
+    std::cout << "nEvents: " << *n_events << std::endl;
 }

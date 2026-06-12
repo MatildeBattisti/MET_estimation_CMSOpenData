@@ -10,3 +10,6 @@ venv/
 # Typst files for documentation
 *.typvenv/
 *.typ
+
+# Ignore parquet files
+*.parquet
