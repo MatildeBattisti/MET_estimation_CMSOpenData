@@ -9,6 +9,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 import logging
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 #
+import uproot
 import gc
 import json
 import multiprocessing as mp
@@ -32,23 +33,36 @@ import matplotlib.pyplot as plt
 
 def _read_data(file_path: str):
     """
-        Reads a .parquet file and returns all columns as a branch/data pair.
+        Reads the 'Events' TTree from a .root file and returns
+        all branches as a branch/data pair.
     """
-    filename   = os.path.basename(file_path)
-    file, ext = os.path.splitext(filename)
+    filename = os.path.basename(file_path)
+    _, ext = os.path.splitext(filename)
 
-    if ext != ".parquet":
-        raise ValueError(f"Expected a .parquet file, got '{ext}'.")
+    if ext != ".root":
+        raise ValueError(f"Expected a .root file, got '{ext}'.")
 
-    df = pd.read_parquet(file_path)
+    with uproot.open(file_path) as root_file:
+        if "Events" not in root_file:
+            raise ValueError("TTree 'Events' not found in the ROOT file.")
+
+        tree = root_file["Events"]
+
+        # Load all branches into a pandas DataFrame
+        df = tree.arrays(library="pd")
 
     if "GenMET_pt" not in df.columns:
-        raise ValueError("Column 'GenMET_pt' (target) not found in the parquet file.")
+        raise ValueError(
+            "Column 'GenMET_pt' (target) not found in the ROOT file."
+        )
 
     branches = list(df.columns)
-    data     = {b: df[b].to_numpy() for b in branches}
+    data = {b: df[b].to_numpy() for b in branches}
 
-    print(f"Loaded dataset '{filename}' — {len(branches)} columns, {len(df)} events.")
+    print(
+        f"Loaded dataset '{filename}' "
+        f"(tree 'Events') — {len(branches)} branches, {len(df)} events."
+    )
     return branches, data
 
 

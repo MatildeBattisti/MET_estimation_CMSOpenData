@@ -1,29 +1,36 @@
-import os
-import json
-#import tensorflow as tf
-import keras
-from sklearn.metrics import mean_squared_error
-import numpy as np
-import pandas as pd
-import shap
-import matplotlib.pyplot as plt
+from MET_unified_utils import (
+    _read_data, _apply_standardize,
+    os, json, keras,
+    np, pd, shap, plt
+)
+from sklearn.metrics import mean_squared_error, r2_score
 
 
-def load_model_and_scaler(model_dir: str, event: str):
+DATASETS = {
+    "DYJetsToLL":   "TestingDatasets/testing_DYJetsToLL.root",
+    "HToAATo2Mu2B": "TestingDatasets/testing_HToAATo2Mu2B.root",
+    "ZZTo2L2Nu":    "TestingDatasets/testing_ZZTo2L2Nu.root",
+}
+
+
+MODEL_DIR  = "Results/"
+OUTPUT_DIR = "Results/"
+
+
+def load_model_and_scaler(results_dir: str):
     """
-    Loads a previously saved model, scaler, and inference config.
+        Loads a previously saved model, scaler, and run summary.
 
-    Returns
-    -------
-    model          : compiled Keras model ready for .predict()
-    scaler         : dict with keys 'mean' and 'std' (np.ndarray)
-    inference_cfg  : dict with feature_names, target_transform, best_params
+        Returns:
+        model      : compiled Keras model ready for .predict()
+        scaler     : dict with keys 'mean' and 'std' (np.ndarray)
+        run_summary: dict containing feature_names, target_transform, batch_size, ...
     """
-    model_path  = os.path.join(model_dir, f"{event}_model.keras")
-    scaler_path = os.path.join(model_dir, f"{event}_scaler.npz")
-    cfg_path    = os.path.join(model_dir, f"{event}_inference_cfg.json")
+    model_path       = os.path.join(results_dir, "model.keras")
+    scaler_path      = os.path.join(results_dir, "scaler.npz")
+    run_summary_path = os.path.join(results_dir, "run_summary.json")
 
-    for path in (model_path, scaler_path, cfg_path):
+    for path in (model_path, scaler_path, run_summary_path):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Missing saved artefact: {path}")
 
@@ -32,40 +39,36 @@ def load_model_and_scaler(model_dir: str, event: str):
     npz    = np.load(scaler_path)
     scaler = {"mean": npz["mean"], "std": npz["std"]}
 
-    with open(cfg_path) as f:
-        inference_cfg = json.load(f)
+    with open(run_summary_path, "r") as f:
+        run_summary = json.load(f)
 
-    print(f"Loaded model + scaler for event '{event}' from '{model_dir}'.")
-    return model, scaler, inference_cfg
+    print(f"Loaded model + scaler from '{results_dir}'.")
+    return model, scaler, run_summary
 
 
-def predict_on_dataset(file_path: str, model_dir: str, event: str,
+def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
                        output_dir: str = None):
     """
-    End-to-end inference on a new parquet dataset using a previously saved
-    model and scaler.  No retraining is performed.
+        End-to-end inference on a new .root dataset using a previously loaded
+        model and scaler. No retraining is performed.
 
-    Steps
-    -----
-    1. Load model, scaler, and inference config from model_dir.
-    2. Read the new parquet (all columns).
-    3. Validate that the expected features are present.
-    4. Standardize with the saved scaler.
-    5. Predict and de-transform if necessary.
-    6. Optionally save predictions as a parquet file.
+        Steps:
+        1. Read the .root file (all branches).
+        2. Validate that the expected features are present.
+        3. Standardize with the saved scaler.
+        4. Predict and de-transform if target_transform == 'log1p'.
+        5. Save a parquet with columns: MET_pt_pred, GenMET_pt, MET_pt.
 
-    Returns
-    -------
-    y_pred_GeV : np.ndarray  — predictions in GeV
-    y_true_GeV : np.ndarray or None — ground truth if 'GenMET_pt' is in the file
+        Returns:
+        y_pred_GeV : np.ndarray         — NN predictions in GeV
+        y_true_GeV : np.ndarray or None — GenMET_pt if present in the file
+        met_pt     : np.ndarray or None — reconstructed MET_pt if present
     """
-    model, scaler, inference_cfg = load_model_and_scaler(model_dir, event)
+    feature_names    = run_summary["feature_names"]
+    target_transform = run_summary.get("cfg_target_transform", "none")
+    batch_size       = run_summary["batch_size"]
 
-    feature_names    = inference_cfg["feature_names"]
-    target_transform = inference_cfg["target_transform"]
-    batch_size       = inference_cfg["best_params"]["batch_size"]
-
-    # ── load new dataset ──────────────────────────────────────────────────
+    # load testing dataset
     branches, data = _read_data(file_path)
 
     missing = [f for f in feature_names if f not in data]
@@ -74,10 +77,10 @@ def predict_on_dataset(file_path: str, model_dir: str, event: str,
             f"New dataset is missing features expected by the model: {missing}"
         )
 
-    X_new = np.column_stack([data[f] for f in feature_names]).astype(np.float32)
+    X_new        = np.column_stack([data[f] for f in feature_names]).astype(np.float32)
     X_new_scaled = _apply_standardize(X_new, scaler["mean"], scaler["std"])
 
-    # ── predict ───────────────────────────────────────────────────────────
+    # prediction
     y_pred = model.predict(X_new_scaled, batch_size=batch_size, verbose=0).flatten()
 
     if target_transform == "log1p":
@@ -85,39 +88,67 @@ def predict_on_dataset(file_path: str, model_dir: str, event: str,
     else:
         y_pred_GeV = y_pred
 
-    # ── ground truth (optional) ───────────────────────────────────────────
-    y_true_GeV = None
-    if "GenMET_pt" in data:
-        y_true_GeV = data["GenMET_pt"]
-        rmse = float(np.sqrt(mean_squared_error(y_true_GeV, y_pred_GeV)))
-        print(f"Test RMSE on '{os.path.basename(file_path)}': {rmse:.4f} GeV")
+    # ground truth
+    y_true_GeV = data.get("GenMET_pt", None)
 
-    # ── save predictions ──────────────────────────────────────────────────
+    # reconstructed MET
+    MET_pt = data.get("MET_pt", None)
+    if MET_pt is None:
+        print("  [WARNING] Branch 'MET_pt' not found — column will be missing.")
+
+    # metrics
+    if y_true_GeV is not None:
+
+        # Predicted MET vs GenMET
+        mse_pred = mean_squared_error(y_true_GeV, y_pred_GeV)
+        rmse_pred = np.sqrt(mse_pred)
+        r2_pred = r2_score(y_true_GeV, y_pred_GeV)
+
+        print("\n  Predicted MET vs GenMET")
+        print(f"    MSE  = {mse_pred:.4f} GeV²")
+        print(f"    RMSE = {rmse_pred:.4f} GeV")
+        print(f"    R²   = {r2_pred:.4f}")
+
+        # Reconstructed MET vs GenMET
+        if MET_pt is not None:
+            mse_reco = mean_squared_error(y_true_GeV, MET_pt)
+            rmse_reco = np.sqrt(mse_reco)
+            r2_reco = r2_score(y_true_GeV, MET_pt)
+
+            print("\nReconstructed MET vs GenMET")
+            print(f"    MSE  = {mse_reco:.4f} GeV²")
+            print(f"    RMSE = {rmse_reco:.4f} GeV")
+            print(f"    R²   = {r2_reco:.4f}")
+
+            print("\nImprovement")
+            print(f"    ΔRMSE = {rmse_reco - rmse_pred:.4f} GeV")
+            print(f"    ΔR²   = {r2_pred - r2_reco:.4f}")
+
+    # save parquet
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-        new_event = os.path.splitext(os.path.basename(file_path))[0]
-        out_path  = os.path.join(output_dir, f"predictions_{new_event}.parquet")
-        result_df = pd.DataFrame({"y_pred_GeV": y_pred_GeV})
+        stem     = os.path.splitext(os.path.basename(file_path))[0]
+        out_path = os.path.join(output_dir, f"predictions_{stem}.parquet")
+
+        result_df = pd.DataFrame({"MET_pt_pred": y_pred_GeV})
         if y_true_GeV is not None:
-            result_df["y_true_GeV"] = y_true_GeV
+            result_df["GenMET_pt"] = y_true_GeV
+        if MET_pt is not None:
+            result_df["MET_pt"] = MET_pt
+
         result_df.to_parquet(out_path, index=False)
-        print(f"Predictions saved → {out_path}")
+        print(f"  Saved → {out_path}  |  columns: {list(result_df.columns)}")
+    return y_pred_GeV, y_true_GeV, MET_pt
 
-    return y_pred_GeV, y_true_GeV
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ANALYSIS & REPORTING
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
                               event: str, output_dir: str):
     """
-    Computes SHAP values using GradientExplainer.
-    Plots:
-    - beeswarm summary plot (global importance + direction of effect)
-    - bar plot (mean |SHAP| per feature)
-    Saves the ranked importance to a CSV.
+        Computes SHAP values using GradientExplainer.
+        Plots:
+        - beeswarm summary plot (global importance + direction of effect)
+        - bar plot (mean |SHAP| per feature)
+        Saves the ranked importance to a CSV.
     """
     sample     = X_test[:500].astype(np.float32)
     background = X_test[:100].astype(np.float32)
@@ -153,3 +184,38 @@ def _feature_importance_shap(model, X_test: np.ndarray, feature_names: list,
         os.path.join(output_dir, f"shap_importance_{event}.csv"), index=False
     )
     return
+
+
+if __name__ == "__main__":
+    model, scaler, run_summary = load_model_and_scaler(MODEL_DIR)
+    feature_names = run_summary["feature_names"]
+
+    for event_name, file_path in DATASETS.items():
+        print(f"\n{'='*60}")
+        print(f"Dataset: {event_name}")
+        print('='*60)
+
+        if not os.path.exists(file_path):
+            print(f"  [SKIP] File not found: {file_path}")
+            continue
+
+        y_pred, y_true, MET_pt = predict_on_dataset(
+            file_path  = file_path,
+            model      = model,
+            scaler     = scaler,
+            run_summary= run_summary,
+            output_dir = OUTPUT_DIR,
+        )
+
+        # build X_test (scaled) for SHAP — same pipeline as predict_on_dataset
+        _, data  = _read_data(file_path)
+        X_test   = np.column_stack([data[f] for f in feature_names]).astype(np.float32)
+        X_test   = _apply_standardize(X_test, scaler["mean"], scaler["std"])
+
+        _feature_importance_shap(
+            model         = model,
+            X_test        = X_test,
+            feature_names = feature_names,
+            event         = event_name,
+            output_dir    = OUTPUT_DIR,
+        )

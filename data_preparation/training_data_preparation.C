@@ -1,5 +1,5 @@
 /**
- * @file merge_datasets.C
+ * @file training_data_preparation.C
  * @brief Merges raw .root files together, keeping only selected branches.
  */
 #include <ROOT/RDataFrame.hxx>
@@ -45,7 +45,7 @@ const int kNJetSlots = 6;
 /**
  * @brief Main.
  */
-void data_preparation()
+void training_data_preparation()
 {
     const std::string file1  = "../OriginalTrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root";
     const std::string file2  = "../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
@@ -202,5 +202,5 @@ void data_preparation()
     merger.SetNotrees(kTRUE);
     merger.Merge();
 
-    std::cout << "\nMerging completed. Output: " << output << std::endl;
+    std::cout << "\nMerging and training data preparation completed. Output: " << output << std::endl;
 }
