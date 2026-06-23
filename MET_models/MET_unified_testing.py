@@ -7,14 +7,14 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 
 DATASETS = {
-    "DYJetsToLL":   "TestingDatasets/testing_DYJetsToLL.root",
-    "HToAATo2Mu2B": "TestingDatasets/testing_HToAATo2Mu2B.root",
-    "ZZTo2L2Nu":    "TestingDatasets/testing_ZZTo2L2Nu.root",
+    "DYJetsToLL":   "../TestingDatasets/testing_DYJetsToLL.root",
+    "HToAATo2Mu2B": "../TestingDatasets/testing_HToAATo2Mu2B.root",
+    "ZZTo2L2Nu":    "../TestingDatasets/testing_ZZTo2L2Nu.root",
 }
 
 
-MODEL_DIR  = "Results/"
-OUTPUT_DIR = "Results/"
+MODEL_DIR  = "Results/results_unified/"
+OUTPUT_DIR = "Results/results_unified/"
 
 
 def load_model_and_scaler(results_dir: str):

@@ -1,4 +1,4 @@
-from MET_unified_utils import (
+from MET_pxpy_utils import (
     _read_data, _data_parsing, _create_model, _standardize,
     _apply_standardize, _build_tensorflow_dataset, _run_fold,
     _model_selection, _retraining,
@@ -11,20 +11,20 @@ from MET_unified_utils import (
 # Dataset training configuration
 DATASET_CFG = {
     # model regularisation
-    "clipnorm":              None,
-    "l2_reg":                0.0,
+    "clipnorm":              1.0,
+    "l2_reg":                1e-3,
     # LR schedule / early stopping
-    "lr_patience":           20,
-    "es_patience_search":    80,
-    "es_patience_retrain":   50,
-    "rlrop_factor":          0.5,
-    "rlrop_min_delta":       1e-4,
-    "rlrop_min_lr":          1e-6,
+    "lr_patience":           25,  #20,
+    "es_patience_search":    100,  #80
+    "es_patience_retrain":   80,
+    "rlrop_factor":          0.3,
+    "rlrop_min_delta":       1e-5,  #5e-5,
+    "rlrop_min_lr":          1e-7,  #1e-6,
     # training loop
     "max_epochs_search":     1500,
     "max_epochs_retrain":    1000,
-    "retrain_val_fraction":  0.1,
-    "target_transform":      "none",
+    "retrain_val_fraction":  0.15,
+    "target_transform":      "none",   # "log1p" only if px,py are strictly positive
     # CV
     "random_seed_kfold":     42,
     "n_folds":               3,
@@ -40,8 +40,8 @@ if __name__ == "__main__":
     print(f"Keras version: {keras.__version__}")
     print(f"Tensorflow version: {tf.__version__}")
     
-    INPUT_FILE = f"TrainingDatasets/training.parquet"
-    OUTPUT_DIR = f"Results/"
+    INPUT_FILE = f"../TrainingDatasets/training_pxpy.root"
+    OUTPUT_DIR = f"../Results/results_pxpy/"
 
     print("GPUs available:", tf.config.list_physical_devices("GPU"))
     
@@ -54,10 +54,11 @@ if __name__ == "__main__":
     # Grid-search with K-Fold CV (test set held-out throughout)
     HPARAM_GRID = {
         "architecture": [
-            (512, 256),
+            (128, 64, 32),
+            (512, 256, 128),      # tieni il best
         ],
-        "batch_size":    [512],
-        "learning_rate": [1e-3],
+        "batch_size":    [4096, 8192],#[2048, 4096]e
+        "learning_rate": [3e-4, 1e-4]#[3e-4, 1e-4, 5e-5],
     }
         
     hparam_grid = HPARAM_GRID
@@ -72,7 +73,7 @@ if __name__ == "__main__":
             rows.append({"fold": fh["fold"], "epoch": ep, "loss": tl, "val_loss": vl})
 
     pd.DataFrame(rows).to_parquet(
-        os.path.join(OUTPUT_DIR, f"fold_histories.parquet"), index=False
+        os.path.join(OUTPUT_DIR, f"fold_histories_pxpy.parquet"), index=False
     )
 
     # Retrain best model and predict on test set
@@ -97,6 +98,5 @@ if __name__ == "__main__":
 
     # Save retraining learning curve for external plotting
     pd.DataFrame(history.history).to_parquet(
-        os.path.join(OUTPUT_DIR, f"learning_curves.parquet"), index=False
+        os.path.join(OUTPUT_DIR, f"learning_curves_pxpy.parquet"), index=False
     )
-

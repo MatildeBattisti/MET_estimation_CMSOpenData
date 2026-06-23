@@ -59,12 +59,6 @@ const std::vector<std::string> Branches = {
  */
 void skimming_data_understanding() {
     /**
-     * @brief Enable implicit multi-threading for RDataFrame.
-     * Remove or set to 1 to disable parallelism.
-     */
-    //ROOT::EnableImplicitMT();
-
-    /**
      * @brief Build RDataFrame directly from the TChain-equivalent:
      * - first argument is the TTree name
      * - second is the input file (or a vector/glob of files for multiple inputs).

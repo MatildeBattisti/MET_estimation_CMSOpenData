@@ -25,7 +25,7 @@ void data_retrieving() {
     //TFile *file = TFile::Open("CleanedDatasets/cleaned_HToAATo2Mu2B.root");
     //TFile *file = TFile::Open("CleanedDatasets/cleaned_ZZTo2L2Nu.root");
 
-    TFile *file = TFile::Open("TrainingDataset/training.root");
+    TFile *file = TFile::Open("TrainingDataset/training_pxpy.root");
 
     if (!file || file->IsZombie()) {
         std::cerr << "Error opening file." << std::endl;

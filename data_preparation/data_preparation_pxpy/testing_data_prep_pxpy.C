@@ -1,13 +1,12 @@
 /**
- * @file training_data_preparation.C
- * @brief Merges raw .root files together, keeping only selected branches.
+ * @file testing_data_preparation.C
+ * @brief Keeps only selected branches for the testing datasets.
  */
 #include <ROOT/RDataFrame.hxx>
 #include <TFile.h>
 #include <TKey.h>
 #include <TTree.h>
 #include <TClass.h>
-#include <TFileMerger.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -34,7 +33,7 @@ std::vector<std::string> GetTreeNames(const std::string& filename)
 
 
 /**
- * @brief Ordinal suffix helpers for branch naming (st, nd, rd, fourth, fifth, sixth)
+ * @brief Ordinal suffix helpers for Jets branch naming.
  */
 const std::vector<std::string> kJetSuffixes = {
     "st", "nd", "rd", "fourth", "fifth", "sixth"
@@ -45,28 +44,22 @@ const int kNJetSlots = 6;
 /**
  * @brief Main.
  */
-void training_data_preparation()
-{
-    const std::string file1  = "../OriginalTrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root";
-    const std::string file2  = "../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
-    const std::string file3  = "../OriginalTrainingDatasets/ZZTo2L2Nu/DC33D4B8-4AF1-C94A-8F03-EDB634488D2B.root";
-    const std::string output = "../TrainingDataset/training.root";
+void testing_data_prep_pxpy(){
+    const std::string input = "../../OriginalTestingDatasets/DYJetsToLL/6C3CD8A5-A288-724E-BF9F-BAAC46A4C139.root";
+    const std::string output = "../../TestingDatasets/testing_pxpy_DYJetsToLL.root";
 
-    const std::vector<std::string> inputFiles = {file1, file2, file3};
-
-    // Jet array variables that will be unpacked into N scalar branches
     const std::vector<std::string> jetVecBranches = {
-        "Jet_pt", "Jet_phi", "Jet_eta", "Jet_mass"
+        "Jet_eta", "Jet_mass", "Jet_px", "Jet_py"
     };
 
-    // Selecting scalar branches to save
     const std::vector<std::string> selectedBranches = {
-        "GenMET_pt",
+        "GenMET_px",
+        "GenMET_py",
+        "MET_px",
+        "MET_py",
         "MET_covXX",
         "MET_covXY",
         "MET_covYY",
-        "MET_phi",
-        "MET_pt",
         "MET_significance",
         "MET_sumEt",
         "MET_sumPtUnclustered",
@@ -87,16 +80,19 @@ void training_data_preparation()
         "nJet",
     };
 
-    auto treeNames = GetTreeNames(file1);
+    auto treeNames = GetTreeNames(input);
     if (treeNames.empty()) {
-        std::cerr << "[ERROR] No TTree found in " << file1 << std::endl;
+        std::cerr << "[ERROR] No TTree found in " << input << std::endl;
         return;
     }
 
     bool firstTree = true;
 
+    /**
+     * @brief Collects scalar branches and processes the vectorial ones.
+     * Expands each Jet vector branch into kNJetSlots scalar columns with zero-padding when nJet < kNJetSlots.
+     */
     for (const auto& treeName : treeNames) {
-        // Processing only the TTree "Events"
         if (treeName != "Events") {
             std::cout << "[INFO] Skipping TTree: " << treeName << std::endl;
             continue;
@@ -104,18 +100,51 @@ void training_data_preparation()
 
         std::cout << "[INFO] Processing TTree: " << treeName << std::endl;
 
-        ROOT::RDataFrame rdf_raw(treeName, inputFiles);
+        ROOT::RDataFrame rdf_raw(treeName, input);
 
-        // Expanding each Jet vector branch into kNJetSlots scalar columns
-        // with zero-padding when nJet < kNJetSlots.
         ROOT::RDF::RNode rdf = rdf_raw;
 
-        // Collect the names of every new scalar column we generate
+        /**
+         * @brief Feature engineering.
+         * Transforming pt, phi into px, py:
+         * px = pt * cos(phi),  py = pt * sin(phi)
+         */
+        // Scalar cartesian components for GenMET and MET
+        rdf = rdf.Define("GenMET_px",
+            [](float pt, float phi) { return pt * std::cos(phi); },
+            {"GenMET_pt", "GenMET_phi"}
+        );
+        rdf = rdf.Define("GenMET_py",
+            [](float pt, float phi) { return pt * std::sin(phi); },
+            {"GenMET_pt", "GenMET_phi"}
+        );
+        rdf = rdf.Define("MET_px",
+            [](float pt, float phi) { return pt * std::cos(phi); },
+            {"MET_pt", "MET_phi"}
+        );
+        rdf = rdf.Define("MET_py",
+            [](float pt, float phi) { return pt * std::sin(phi); },
+            {"MET_pt", "MET_phi"}
+        );
+
+        // Jet_px and Jet_py as RVec columns
+        rdf = rdf.Define("Jet_px",
+            [](const ROOT::RVecF& pt, const ROOT::RVecF& phi) {
+                return ROOT::RVecF(pt * cos(phi));
+            },
+            {"Jet_pt", "Jet_phi"}
+        );
+        rdf = rdf.Define("Jet_py",
+            [](const ROOT::RVecF& pt, const ROOT::RVecF& phi) {
+                return ROOT::RVecF(pt * sin(phi));
+            },
+            {"Jet_pt", "Jet_phi"}
+        );
+
+        // Expand jet vector branches into scalar slots
         std::vector<std::string> expandedCols;
 
         for (const auto& vecBranch : jetVecBranches) {
-
-            // Check the vector branch actually exists in this tree
             auto availableCheck = rdf.GetColumnNames();
             bool vecExists = std::find(
                 availableCheck.begin(), availableCheck.end(), vecBranch
@@ -131,8 +160,6 @@ void training_data_preparation()
                 const std::string newCol = vecBranch + "_" + kJetSuffixes[i];
                 const int slot = i; // capture by value for the lambda
 
-                // ROOT::RVec<float> is the typical NanoAOD type;
-                // adjust to double if your files use doubles.
                 rdf = rdf.Define(newCol,
                     [slot](const ROOT::RVecF& v) -> float {
                         return (slot < (int)v.size()) ? v[slot] : 0.f;
@@ -144,14 +171,16 @@ void training_data_preparation()
             }
         }
 
-        // Build the final list of branches to snapshot:
-        //   1. scalar selectedBranches that exist in the tree
-        //   2. the newly defined scalar jet columns
+        /**
+         * @brief Builds the final list of branches to snapshot:
+         * 1. scalar selectedBranches that exist in the tree;
+         * 2. newly defined scalar jet columns.
+         */
         auto availableCols = rdf.GetColumnNames();
 
         std::vector<std::string> validBranches;
 
-        // original scalar branches
+        // Original scalar branches
         for (const auto& b : selectedBranches) {
             if (std::find(availableCols.begin(), availableCols.end(), b)
                     != availableCols.end()) {
@@ -161,7 +190,7 @@ void training_data_preparation()
             }
         }
 
-        // expanded jet scalar columns (already guaranteed to exist via Define)
+        // Expanded jet scalar columns
         for (const auto& col : expandedCols)
             validBranches.push_back(col);
 
@@ -170,11 +199,22 @@ void training_data_preparation()
             continue;
         }
 
-        // Quality filters
+        /**
+         * @brief Setting quality filters.
+         */
         rdf = rdf.Filter("MET_pt > 0", "MET_pt > 0");
-        rdf = rdf.Filter("Jet_pt_st > 0", "Leading jet pt > 0");
+        rdf = rdf.Filter(
+            [](const ROOT::RVecF& pt) {
+                return !pt.empty() && pt[0] > 0.f;
+            },
+            {"Jet_pt"},
+            "Leading jet pt > 0"
+        );
         rdf = rdf.Filter("Jet_mass_st > 0", "Leading jet mass > 0");
 
+        /**
+         * @brief Cleaning snapshot.
+         */
         ROOT::RDF::RSnapshotOptions opts;
         opts.fMode             = firstTree ? "RECREATE" : "UPDATE";
         opts.fLazy             = false;
@@ -182,25 +222,15 @@ void training_data_preparation()
 
         auto report = rdf.Report();
         rdf.Snapshot(treeName, output, validBranches, opts);
-
-        auto nEntries = rdf.Count().GetValue();
-        std::cout << " -> " << nEntries << " written entries" << std::endl;
-
-        // Prints the cutflow
         report->Print();
+
+        TFile* fout = TFile::Open(output.c_str(), "READ");
+        TTree* tout = fout->Get<TTree>(treeName.c_str());
+        std::cout << " -> " << tout->GetEntries() << " written entries" << std::endl;
+        fout->Close();
 
         firstTree = false;
     }
 
-    // Copy non-TTree objects
-    std::cout << "[INFO] Copying non-TTree objects" << std::endl;
-
-    TFileMerger merger(kFALSE);
-    merger.OutputFile(output.c_str(), "UPDATE");
-    for (const auto& f : inputFiles)
-        merger.AddFile(f.c_str());
-    merger.SetNotrees(kTRUE);
-    merger.Merge();
-
-    std::cout << "\nMerging and training data preparation completed. Output: " << output << std::endl;
+    std::cout << "\nTesting data preparation completed. Output: " << output << std::endl;
 }

@@ -13,3 +13,9 @@ venv/
 
 # Ignore parquet files
 *.parquet
+
+# Ignore csv files
+*.csv
+
+# Ignore keras files
+*.keras
