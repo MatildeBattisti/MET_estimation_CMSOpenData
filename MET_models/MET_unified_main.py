@@ -13,6 +13,7 @@ DATASET_CFG = {
     # model regularisation
     "clipnorm":              1.0,
     "l2_reg":                1e-1,
+    "droput_rate":           0.2,
     # LR schedule / early stopping
     "lr_patience":           40,
     "es_patience_search":    80,
@@ -24,7 +25,7 @@ DATASET_CFG = {
     "max_epochs_search":     1500,
     "max_epochs_retrain":    1000,
     "retrain_val_fraction":  0.15,
-    "target_transform":      "none",
+    "target_transform":      "none",  # "log1p", "response", "residual"
     # CV
     "random_seed_kfold":     42,
     "n_folds":               3,
@@ -53,7 +54,7 @@ if __name__ == "__main__":
     branches, data = _read_data(INPUT_FILE)
 
     # Parse into feature matrix & target
-    features, target, feature_names = _data_parsing(branches, data)
+    features, target, MET_pt, feature_names = _data_parsing(branches, data)
 
     # Grid-search with K-Fold CV (test set held-out throughout)
     HPARAM_GRID = {
@@ -68,8 +69,8 @@ if __name__ == "__main__":
         
     hparam_grid = HPARAM_GRID
 
-    X_train, y_train, best_params, target_train_loss, best_fold_histories, best_cv_metrics, topk_buffer = _model_selection(
-        features, target, hparam_grid, OUTPUT_DIR, cfg
+    X_train, y_train, MET_pt_train, best_params, target_train_loss, best_fold_histories, best_cv_metrics, topk_buffer = _model_selection(
+        features, target, MET_pt, hparam_grid, OUTPUT_DIR, cfg
     )
 
     rows = []
@@ -83,7 +84,7 @@ if __name__ == "__main__":
 
     # Retrain best model and predict on test set
     history, best_model, retrain_metrics, scaler = _retraining(
-        X_train, y_train, best_params, cfg, target_train_loss
+        X_train, y_train, MET_pt_train, best_params, cfg, target_train_loss
     )
 
     _save_model_and_scaler(

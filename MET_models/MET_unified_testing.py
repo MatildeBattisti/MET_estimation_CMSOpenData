@@ -49,96 +49,99 @@ def load_model_and_scaler(results_dir: str):
 def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
                        output_dir: str = None):
     """
-        End-to-end inference on a new .root dataset using a previously loaded
-        model and scaler. No retraining is performed.
+        End-to-end inference over the .root dataset.
 
-        Steps:
-        1. Read the .root file (all branches).
-        2. Validate that the expected features are present.
-        3. Standardize with the saved scaler.
-        4. Predict and de-transform if target_transform == 'log1p'.
-        5. Save a parquet with columns: MET_pt_pred, GenMET_pt, MET_pt.
+        1. Reads the .root file;
+        2. Validates the expected features;
+        3. Standardizes with the saved scaler;
+        4. Predicts and de-transforms in GenMET [Gev] according to target_transform;
+        5. Saves a .parquet with columns: MET_pt_pred, GenMET_pt, MET_pt.
 
-        Returns:
-        y_pred_GeV : np.ndarray         — NN predictions in GeV
-        y_true_GeV : np.ndarray or None — GenMET_pt if present in the file
-        met_pt     : np.ndarray or None — reconstructed MET_pt if present
+        De-trasformazione:
+          none     -> y_pred = GenMET_pt
+          log1p    -> GenMET_pt = expm1(y_pred)
+          response -> GenMET_pt = MET_pt / y_pred
+          residual -> GenMET_pt = MET_pt - y_pred
     """
     feature_names    = run_summary["feature_names"]
     target_transform = run_summary.get("cfg_target_transform", "none")
     batch_size       = run_summary["batch_size"]
 
-    # load testing dataset
     branches, data = _read_data(file_path)
 
     missing = [f for f in feature_names if f not in data]
     if missing:
-        raise ValueError(
-            f"New dataset is missing features expected by the model: {missing}"
-        )
+        raise ValueError(f"Feature mancanti nel dataset: {missing}")
 
     X_new        = np.column_stack([data[f] for f in feature_names]).astype(np.float32)
     X_new_scaled = _apply_standardize(X_new, scaler["mean"], scaler["std"])
 
-    # prediction
     y_pred = model.predict(X_new_scaled, batch_size=batch_size, verbose=0).flatten()
 
-    if target_transform == "log1p":
-        y_pred_GeV = np.expm1(y_pred)
+    # MET_pt serve per de-trasformare response e residual
+    MET_pt     = data.get("MET_pt", None)
+    y_true_gev = data.get("GenMET_pt", None)
+
+    needs_met = target_transform in ("response", "residual")
+    if needs_met and MET_pt is None:
+        raise ValueError(
+            f"'MET_pt' non trovata nel file ma necessaria per "
+            f"target_transform='{target_transform}'."
+        )
+
+    # De-transforms in GenMET_pt [GeV]
+    if target_transform == "none":
+        y_pred_gev = y_pred
+    elif target_transform == "log1p":
+        y_pred_gev = np.expm1(y_pred)
+    elif target_transform == "response":
+        y_pred_gev = MET_pt / np.where(y_pred == 0, 1e-9, y_pred)
+    elif target_transform == "residual":
+        y_pred_gev = MET_pt - y_pred
     else:
-        y_pred_GeV = y_pred
+        raise ValueError(f"target_transform sconosciuto: '{target_transform}'")
 
-    # ground truth
-    y_true_GeV = data.get("GenMET_pt", None)
-
-    # reconstructed MET
-    MET_pt = data.get("MET_pt", None)
-    if MET_pt is None:
-        print("  [WARNING] Branch 'MET_pt' not found — column will be missing.")
-
-    # metrics
-    if y_true_GeV is not None:
-
-        # Predicted MET vs GenMET
-        mse_pred = mean_squared_error(y_true_GeV, y_pred_GeV)
+    # Metrics (all in GeVs)
+    if y_true_gev is not None:
+        mse_pred  = mean_squared_error(y_true_gev, y_pred_gev)
         rmse_pred = np.sqrt(mse_pred)
-        r2_pred = r2_score(y_true_GeV, y_pred_GeV)
+        r2_pred   = r2_score(y_true_gev, y_pred_gev)
 
-        print("\n  Predicted MET vs GenMET")
+        print(f"\n  NN prediction vs GenMET_pt  [transform='{target_transform}']")
         print(f"    MSE  = {mse_pred:.4f} GeV²")
         print(f"    RMSE = {rmse_pred:.4f} GeV")
         print(f"    R²   = {r2_pred:.4f}")
 
-        # Reconstructed MET vs GenMET
         if MET_pt is not None:
-            mse_reco = mean_squared_error(y_true_GeV, MET_pt)
+            mse_reco  = mean_squared_error(y_true_gev, MET_pt)
             rmse_reco = np.sqrt(mse_reco)
-            r2_reco = r2_score(y_true_GeV, MET_pt)
+            r2_reco   = r2_score(y_true_gev, MET_pt)
 
-            print("\nReconstructed MET vs GenMET")
+            print(f"\n  Reconstructed MET_pt vs GenMET_pt")
             print(f"    MSE  = {mse_reco:.4f} GeV²")
             print(f"    RMSE = {rmse_reco:.4f} GeV")
             print(f"    R²   = {r2_reco:.4f}")
 
-            print("\nImprovement")
-            print(f"    ΔRMSE = {rmse_reco - rmse_pred:.4f} GeV")
-            print(f"    ΔR²   = {r2_pred - r2_reco:.4f}")
+            print(f"\n  Improvement")
+            print(f"    DELTA_RMSE = {rmse_reco - rmse_pred:.4f} GeV")
+            print(f"    DELTA_R²   = {r2_pred   - r2_reco:.4f}")
 
-    # save parquet
+    # Saves a .parquet
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
         stem     = os.path.splitext(os.path.basename(file_path))[0]
         out_path = os.path.join(output_dir, f"predictions_{stem}.parquet")
 
-        result_df = pd.DataFrame({"MET_pt_pred": y_pred_GeV})
-        if y_true_GeV is not None:
-            result_df["GenMET_pt"] = y_true_GeV
+        result_df = pd.DataFrame({"MET_pt_pred": y_pred_gev})
+        if y_true_gev is not None:
+            result_df["GenMET_pt"] = y_true_gev
         if MET_pt is not None:
             result_df["MET_pt"] = MET_pt
 
         result_df.to_parquet(out_path, index=False)
-        print(f"  Saved → {out_path}  |  columns: {list(result_df.columns)}")
-    return y_pred_GeV, y_true_GeV, MET_pt
+        print(f"\n  Saved → {out_path}  |  columns: {list(result_df.columns)}")
+
+    return y_pred_gev, y_true_gev, MET_pt
 
 
 def _feature_importance_shap(model, X_test: np.ndarray, feature_names: list,

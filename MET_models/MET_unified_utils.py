@@ -17,7 +17,7 @@ import tensorflow as tf
 import keras
 from keras.models import Sequential
 from keras.regularizers import l2
-from keras.layers import Input, Dense, ReLU
+from keras.layers import Input, Dense, ReLU, Dropout
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from keras.optimizers import Adam
 from sklearn.model_selection import KFold, train_test_split
@@ -66,24 +66,54 @@ def _read_data(file_path: str):
     return branches, data
 
 
-def _data_parsing(branches: list, data: dict):
+def _data_parsing(branches: list, data: dict, cfg: dict):
     """
-        Splits the branch dictionary into a feature matrix X and a target vector y.
-        'GenMET_pt' is always used as the target; every other column is a feature.
-    """
-    TARGET       = "GenMET_pt"
-    feature_names = [b for b in branches if b != TARGET]
-    features      = np.column_stack([data[name] for name in feature_names])
-    target        = data[TARGET]
+        Builds feature matrix X, target y, and MET_pt (for transforming back).
 
-    print(f"Shape of features and target:")
-    print(f"    (N events, N features): {features.shape}")
-    print(f"    (N events, N target):   {target.shape}")
-    return features, target, feature_names
+        cfg["target_transform"]:
+          "none"     -> target = GenMET_pt;           MET_pt is a feature
+          "log1p"    -> target = log(1 + GenMET_pt);  MET_pt is a feature
+          "response" -> target = MET_pt / GenMET_pt;  MET_pt is not a feature (leakage)
+          "residual" -> target = MET_pt - GenMET_pt;  MET_pt is not a feature (leakage)
+    """
+    TARGET    = "GenMET_pt"
+    MET_COL   = "MET_pt"
+    transform = cfg.get("target_transform", "none")
+
+    for col in (TARGET, MET_COL):
+        if col not in branches:
+            raise ValueError(f"Colonna '{col}' non trovata nel file ROOT.")
+
+    MET_used_in_target = transform in ("response", "residual")
+    exclude = {TARGET, MET_COL} if MET_used_in_target else {TARGET}
+
+    feature_names = [b for b in branches if b not in exclude]
+    features      = np.column_stack([data[name] for name in feature_names])
+    GenMET_pt       = data[TARGET]
+    MET_pt        = data[MET_COL]
+
+    if transform == "none":
+        target = GenMET_pt.copy()
+    elif transform == "log1p":
+        target = np.log1p(GenMET_pt)
+    elif transform == "response":
+        target = MET_pt / np.where(GenMET_pt == 0, 1.0, GenMET_pt)
+    elif transform == "residual":
+        target = MET_pt - GenMET_pt
+    else:
+        raise ValueError(f"target_transform sconosciuto: '{transform}'")
+
+    print(f"target_transform  : '{transform}'")
+    print(f"MET_pt as feature : {not MET_used_in_target}")
+    print(f"    features shape : {features.shape}")
+    print(f"    target   shape : {target.shape}")
+
+    return features, target, MET_pt, feature_names
 
 
 def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
-                  clipnorm: float = None, l2_reg: float = 0.0):
+                  clipnorm: float = None, l2_reg: float = 0.0,
+                  dropout_rate: float = 0.0):
     """
         Builds a Sequential model.
 
@@ -101,6 +131,8 @@ def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
     for n_units in architecture:
         model.add(Dense(n_units, kernel_regularizer=regularizer))
         model.add(keras.layers.ReLU())
+        if dropout_rate > 0.0:
+            model.add(Dropout(rate=dropout_rate))
 
     model.add(Dense(1, activation="linear"))
 
@@ -208,6 +240,7 @@ def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
             learning_rate = params["learning_rate"],
             clipnorm      = cfg["clipnorm"],
             l2_reg        = cfg["l2_reg"],
+            dropout_rate  = cfg["dropout_rate"],
         )
 
         early_stop = EarlyStopping(
@@ -253,7 +286,8 @@ def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
     return
 
 
-def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
+def _model_selection(features: np.ndarray, target: np.ndarray,
+                     MET_pt, hparam_grid,
                      output_dir: str, cfg: dict):
     """
         2. Standardizes each fold independently: mean and std are computed on
@@ -279,20 +313,9 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
     """
     starting_time = time.time()
 
-    #indices = np.arange(len(features))
-    #train_idx, test_idx = train_test_split(
-    #    indices, test_size=cfg["test_size"], random_state=cfg["random_seed_split"]
-    #)
-    #X_train, X_test = features[train_idx], features[test_idx]
-    #y_train, y_test = target[train_idx],   target[test_idx]
-
     X_train = features
     y_train = target.copy()
-
-
-    if cfg["target_transform"] == "log1p":
-        y_train = np.log1p(y_train)
-        #y_test  = np.log1p(y_test)
+    MET_pt_train = MET_pt
 
     kf = KFold(n_splits=cfg["n_folds"], shuffle=True, random_state=cfg["random_seed_kfold"])
     param_combinations = list(product(*hparam_grid.values()))
@@ -415,14 +438,48 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
         "cv_std_val_rmse":   float(best_row["std_rmse"]),
     }
 
-    return (X_train, y_train, #X_test, y_test,
+    return (X_train, y_train, MET_pt_train,
             best_params, target_train_loss,
             best_fold_histories, best_cv_metrics,
-            topk_buffer)#, test_idx)
+            topk_buffer)
 
+
+def _to_gev(y_true_transformed: np.ndarray,
+            y_pred_transformed: np.ndarray,
+            MET_pt: np.ndarray | None,
+            transform: str):
+    """
+        Helper function to return both the target and prediction in unit measure [GeV].
+
+        none     : y = GenMET_pt          -> does nothing;
+        log1p    : y = log(1 + GenMET_pt) -> applies expm1
+        response : y = MET_pt / GenMET_pt -> GenMET_pt = MET_pt / y
+        residual : y = MET_pt - GenMET_pt -> GenMET_pt = MET_pt - y
+    """
+    if transform == "none":
+        return y_true_transformed, y_pred_transformed
+
+    elif transform == "log1p":
+        return np.expm1(y_true_transformed), np.expm1(y_pred_transformed)
+
+    elif transform == "response":
+        if MET_pt is None:
+            raise ValueError("MET_pt is None but target_transform='response'")
+        safe_true = np.where(y_true_transformed == 0, 1e-9, y_true_transformed)
+        safe_pred = np.where(y_pred_transformed  == 0, 1e-9, y_pred_transformed)
+        return MET_pt / safe_true, MET_pt / safe_pred
+
+    elif transform == "residual":
+        if MET_pt is None:
+            raise ValueError("MET_pt is None but target_transform='residual'")
+        return MET_pt - y_true_transformed, MET_pt - y_pred_transformed
+
+    else:
+        raise ValueError(f"Unknown target_transform: '{transform}'")
+    
 
 def _retraining(X_train: np.ndarray, y_train: np.ndarray,
-                #X_test: np.ndarray, y_test: np.ndarray,
+                MET_pt_train,
                 best_params: dict, cfg: dict,
                 target_train_loss: float):
     """
@@ -437,6 +494,7 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
     starting_time = time.time()
 
     # validation split for early stopping
+    transform    = cfg.get("target_transform", "none")
     val_fraction = cfg.get("retrain_val_fraction", 0.1)
     n_val        = max(1, int(len(X_train) * val_fraction))
     rng          = np.random.default_rng(cfg.get("random_seed_split", 42))
@@ -447,12 +505,14 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
     X_tr, X_val = X_train[train_mask], X_train[val_idx]
     y_tr, y_val = y_train[train_mask], y_train[val_idx]
 
+    # MET_pt for transformin back (None otherwise)
+    MET_tr = MET_pt_train[train_mask] if MET_pt_train is not None else None
     # standardize (fit on X_tr only)
     X_tr,  X_val,  scaler_mean, scaler_std = _standardize(X_tr, X_val)
-    #X_test_scaled = _apply_standardize(X_test, scaler_mean, scaler_std)
 
     print(f"Retraining on full training set  "
-          f"(train={len(X_tr)}, val={len(X_val)}).")  #, test={len(X_test_scaled)}).")
+          f"(train={len(X_tr)}, val={len(X_val)}).")
+    print(f"    Target transform:            '{transform}'")
     print(f"    Target train loss (from CV):  {target_train_loss:.4f}")
 
     train_ds = _build_tensorflow_dataset(X_tr, y_tr, best_params["batch_size"], shuffle=True)
@@ -464,6 +524,7 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
         learning_rate= best_params["learning_rate"],
         clipnorm     = cfg["clipnorm"],
         l2_reg       = cfg["l2_reg"],
+        dropout_rate = cfg["dropout_rate"],
     )
 
     early_stop = EarlyStopping(
@@ -490,30 +551,17 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
     )
 
     # predictions in transformed space
-    y_train_pred = best_model.predict(X_tr,           batch_size=best_params["batch_size"], verbose=0).flatten()
-    #y_test_pred  = best_model.predict(X_test_scaled,  batch_size=best_params["batch_size"], verbose=0).flatten()
+    y_train_pred = best_model.predict(X_tr, batch_size=best_params["batch_size"], verbose=0).flatten()
 
-    # de-transform
-    if cfg["target_transform"] == "log1p":
-        y_train_GeV      = np.expm1(y_tr)
-        #y_test_GeV       = np.expm1(y_test)
-        y_train_pred_GeV = np.expm1(y_train_pred)
-        #y_test_pred_GeV  = np.expm1(y_test_pred)
-    else:
-        y_train_GeV      = y_tr
-        #y_test_GeV       = y_test
-        y_train_pred_GeV = y_train_pred
-        #y_test_pred_GeV  = y_test_pred
+    # de-transforming in GenMET_pt for final metrics
+    y_train_GeV, y_pred_GeV = _to_gev(y_tr, y_train_pred, MET_tr, transform)
 
     retrain_metrics = {
-        "retrain_train_mse":  float(mean_squared_error(y_train_GeV, y_train_pred_GeV)),
-        "retrain_train_rmse": float(np.sqrt(mean_squared_error(y_train_GeV, y_train_pred_GeV))),
-        #"retrain_test_mse":   float(mean_squared_error(y_test_GeV,  y_test_pred_GeV)),
-        #"retrain_test_rmse":  float(np.sqrt(mean_squared_error(y_test_GeV,  y_test_pred_GeV))),
+        "retrain_train_mse":  float(mean_squared_error(y_train_GeV, y_pred_GeV)),
+        "retrain_train_rmse": float(np.sqrt(mean_squared_error(y_train_GeV, y_pred_GeV))),
     }
 
     print(f"  Train  MSE={retrain_metrics['retrain_train_mse']:.4f}  RMSE={retrain_metrics['retrain_train_rmse']:.4f}")
-    #print(f"  Test   MSE={retrain_metrics['retrain_test_mse']:.4f}   RMSE={retrain_metrics['retrain_test_rmse']:.4f}")
 
     elapsed = time.time() - starting_time
     print(f"Retraining and testing completed in {elapsed:.1f}s")
