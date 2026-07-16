@@ -13,13 +13,9 @@ pip3 install -r requirements.txt
 > **Note:** By default, the CPU version of TensorFlow is installed. If you have an NVIDIA GPU, you can enable GPU support by replacing `tensorflow` with `tensorflow[and-cuda]` in `requirements.txt` before installing.
 
 ## View the notebooks
-GitHub may fail to render the notebooks due to their size. Open them directly on `Google Colab`:
+GitHub may fail to render the notebooks due to their size. Open the full repository on `Google Colab` and explore the notebooks:
 
-| Notebook | Open |
-|----------|------|
-| Data Understanding | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_understanding/data_understanding.ipynb) |
-| Data Preparation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/data_preparation/data_preparation.ipynb) |
-| Results | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData/blob/main/Results/) |
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MatildeBattisti/MET_estimation_CMSOpenData)
 
 ## Datasets
 
