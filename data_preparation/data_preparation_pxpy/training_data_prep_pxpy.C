@@ -1,8 +1,7 @@
 /**
  * @file training_data_prep_pxpy.C
- * @brief Merges raw .root files together, keeping only selected branches.
- *        MET, GenMET and Jet quantities are stored as px/py instead of pt/phi.
- *        Draws kSamplesPerFile random events from each input file for balance.
+ * @brief Merges raw .root files, drawing kSamplesPerFile random events from each.
+ *        MET, GenMET and Jet quantities are stored as px/py.
  */
 #include <ROOT/RDataFrame.hxx>
 #include <TFile.h>
@@ -26,7 +25,7 @@
  * @brief Sets per file samples number.
  * Set to -1 for no sampling.
  */
-const Long64_t kSamplesPerFile = 40000;
+const Long64_t kSamplesPerFile = 80000;  //40000;
 
 
 /**
@@ -101,11 +100,11 @@ const int kNJetSlots = 6;
  */
 void training_data_prep_pxpy(){
     const std::string file1  = "../../OriginalTrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root";
-    const std::string file2  = "../../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
+    //const std::string file2  = "../../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
     const std::string file3  = "../../OriginalTrainingDatasets/ZZTo2L2Nu/DC33D4B8-4AF1-C94A-8F03-EDB634488D2B.root";
-    const std::string output = "../../TrainingDataset/training_pxpy.root";
+    const std::string output = "../../TrainingDatasets/training_pxpy_2d.root";
 
-    const std::vector<std::string> inputFiles = {file1, file2, file3};
+    const std::vector<std::string> inputFiles = {file1, file3};
 
     const std::vector<std::string> jetVecBranches = {
         "Jet_eta", "Jet_mass", "Jet_px", "Jet_py"
@@ -147,7 +146,7 @@ void training_data_prep_pxpy(){
 
     std::vector<std::string> tmpFiles;
     for (std::size_t i = 0; i < inputFiles.size(); ++i)
-        tmpFiles.push_back("../../TrainingDataset/tmp_pxpy_" + std::to_string(i) + ".root");
+        tmpFiles.push_back("../../TrainingDatasets/tmp_pxpy_" + std::to_string(i) + ".root");
 
     /**
      * @brief Per-file atomic counter loop (defined once, reset before each file)
@@ -174,14 +173,14 @@ void training_data_prep_pxpy(){
             // Random index set
             Long64_t nTotal = GetNEntries(inFile, treeName);
             if (nTotal <= 0) {
-                std::cerr << "  [ERROR] Could not read entry count.\n";
+                std::cerr << "[ERROR] Could not read entry count.\n";
                 continue;
             }
             std::cout << "  Total entries available : " << nTotal << "\n";
 
             Long64_t nDraw = (kSamplesPerFile < 0 || kSamplesPerFile >= nTotal)
                              ? nTotal : kSamplesPerFile;
-            std::cout << "  Drawing " << nDraw << " random entries "
+            std::cout << "  Drawing " << nDraw << " random entries."
                       << "(seed=" << (42 + (unsigned)fileIdx) << ")\n";
 
             auto chosen = RandomIndices(nTotal, nDraw, 42 + (unsigned)fileIdx);
@@ -194,15 +193,12 @@ void training_data_prep_pxpy(){
             // Build RDataFrame and apply random index filter
             ROOT::RDataFrame rdf_raw(treeName, inFile);
             ROOT::RDF::RNode rdf = rdf_raw
-                .Define("__entry_idx__",
-                    [counterPtr]() -> Long64_t {
-                        return counterPtr->fetch_add(1);
-                    }, {})
+                .Define("__entry_idx__", "rdfentry_")
                 .Filter(
-                    [indexSetPtr](Long64_t idx) {
+                    [indexSetPtr](ULong64_t idx) {
                         return indexSetPtr->count(idx) > 0;
                     },
-                    {"__entry_idx__"}, "Random index selection");
+                {"__entry_idx__"}, "Random index selection");
 
             /**
              * @brief Feature engineering.
@@ -322,18 +318,6 @@ void training_data_prep_pxpy(){
         merger.Merge();
     }
 
-    /**
-     * @brief Copies non-TTree objects from original inputs.
-     */
-    std::cout << "[INFO] Copying non-TTree objects from original inputs\n";
-    {
-        TFileMerger merger(kFALSE);
-        merger.OutputFile(output.c_str(), "UPDATE");
-        for (const auto& f : inputFiles)
-            merger.AddFile(f.c_str());
-        merger.SetNotrees(kTRUE);
-        merger.Merge();
-    }
 
     /**
      * @brief Removes temporary files.
@@ -346,5 +330,5 @@ void training_data_prep_pxpy(){
             std::cout << "  Removed " << tmp << "\n";
     }
 
-    std::cout << "\nDone. Balanced output written to: " << output << std::endl;
+    std::cout << "\n[DONE] Balanced output written to: " << output << std::endl;
 }

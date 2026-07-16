@@ -1,4 +1,5 @@
 /**
+ * @file data_understanding.C
  * @brief Takes only single value branches do perform data understanding
  * over the different datasets.
  */
@@ -59,7 +60,7 @@ const std::vector<std::string> Branches = {
  */
 void skimming_data_understanding() {
     /**
-     * @brief Build RDataFrame directly from the TChain-equivalent:
+     * @brief Builds RDataFrame directly from the TChain-equivalent:
      * - first argument is the TTree name
      * - second is the input file (or a vector/glob of files for multiple inputs).
      */
@@ -69,15 +70,13 @@ void skimming_data_understanding() {
     );
 
     /**
-     * @brief Print total number of events.
-     * Count() is a lazy action: it triggers the event loop only once,
-     * together with the Snapshot below.
+     * @brief Prints total number of events.
      */
     auto n_events = df.Count();
 
     /**
-     * @brief Write the skimmed dataset.
-     * Snapshot selects only the branches in kKeepBranches and writes
+     * @brief Writes the skimmed dataset.
+     * Snapshot selects only the branches in Branches and writes
      * them to the output file. The event loop runs here.
      */
     df.Snapshot("Events",

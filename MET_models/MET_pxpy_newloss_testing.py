@@ -1,5 +1,5 @@
 import argparse
-from MET_pxpy_utils import (
+from MET_pxpy_newloss_utils import (
     _read_data, _apply_standardize,
     os, json, keras,
     np, pd
@@ -14,19 +14,19 @@ DATASETS = {
 }
 
 
-DEFAULT_RESULTS_DIR = "../Results/results_pxpy/"
+DEFAULT_RESULTS_DIR  = "../Results/results_pxpy_newloss_2d/"
 
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Run inference with a trained MET_pxpy model.",
+        description="Run inference with a trained MET_pxpy_newloss model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--results-dir", "-r",
         default=DEFAULT_RESULTS_DIR,
         dest="results_dir",
-        help="Directory containing model_pxpy.keras, scaler_pxpy.npz, and run_summary_pxpy.json.",
+        help="Directory containing model.keras, scaler.npz, and run_summary.json.",
     )
     return parser.parse_args()
 
@@ -36,9 +36,9 @@ def load_model_and_scaler(results_dir: str):
         Loads a previously saved model, scaler, and run summary.
 
         Returns:
-        model      : compiled Keras model ready for .predict()
-        scaler     : dict with keys 'mean' and 'std' (np.ndarray)
-        run_summary: dict containing feature_names, target_transform, batch_size, etc
+            model      : compiled Keras model ready for .predict()
+            scaler     : dict with keys 'mean' and 'std' (np.ndarray)
+            run_summary: dict containing feature_names, target_transform, batch_size, ...
     """
     model_path       = os.path.join(results_dir, "model_pxpy.keras")
     scaler_path      = os.path.join(results_dir, "scaler_pxpy.npz")
@@ -48,7 +48,7 @@ def load_model_and_scaler(results_dir: str):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Missing saved artefact: {path}")
 
-    model = keras.models.load_model(model_path)
+    model = keras.models.load_model(model_path, compile=False)
 
     npz    = np.load(scaler_path)
     scaler = {"mean": npz["mean"], "std": npz["std"]}
@@ -63,34 +63,6 @@ def _compute_pt_from_components(px: np.ndarray, py: np.ndarray) -> np.ndarray:
         Computes MET_pt from px and py components.
     """
     return np.sqrt(px**2 + py**2)
-
-
-def _pred_to_gev(y_pred_transformed: np.ndarray,
-                 MET_pxpy: np.ndarray | None,
-                 transform: str) -> np.ndarray:
-    """
-        De-transforms only the model prediction (px, py columns) into GeV.
-        Ground truth (GenMET_px/py) is already in GeV, so it does not
-        need de-transformation.
-
-        De-transforming:
-          none     -> GenMET_pt = y_pred
-          response -> GenMET_pt = y_pred * MET_p{x,y}  (target = GenMET_p{x,y} / MET_p{x,y})
-          residual -> GenMET_pt = MET_p{x,y} - y_pred  (target = MET_p{x,y} - GenMET_p{x,y})
-    """
-    if transform == "none":
-        return y_pred_transformed
-    elif transform == "response":
-        if MET_pxpy is None:
-            raise ValueError("MET_pxpy is None but target_transform='response'")
-        return y_pred_transformed * MET_pxpy
-    elif transform == "residual":
-        if MET_pxpy is None:
-            raise ValueError("MET_pxpy is None but target_transform='residual'")
-        return MET_pxpy - y_pred_transformed
-    else:
-        raise ValueError(f"Unknown target_transform: '{transform}'")
-    return
 
 
 def _print_metrics(label_pred: str, label_true: str,
@@ -119,46 +91,40 @@ def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
     """
         End-to-end inference on a new .root dataset.
 
-        1. Reads the .root file;
-        2. Validates that the expected features are present;
-        3. Standardizes with the saved scaler;
-        4. Predicts pred_MET_px and pred_MET_py (in transformed space);
-        5. De-transforms only the prediction to GeV via _pred_to_gev, using
-           cfg_target_transform. GenMET_px/py are read straight from file -
-           they are already in GeV and need no round-trip through the
-           transformed space:
-            none     -> identity
-            response -> pred = y_pred * MET_p{x,y}
-            residual -> pred = MET_p{x,y} - y_pred
-        6. Saves a parquet with columns:
-            pred_MET_p{x,y,t}, GenMET_p{x,y,t}, MET_p{x,y,t}
+        Steps:
+            1. Reads the .root file;
+            2. Validates that the expected features are present;
+            3. Standardizes with the saved scaler;
+            4. Predicts pred_MET_px and pred_MET_py (in transformed space);
+            5. Reads reco MET_px/MET_py (needed to de-transform);
+            6. De-transforms to GeV depending on target_transform:
+                "none"     -> identity
+                "residual" -> GenMET_pred = MET - y_pred
+            7. Saves a parquet with columns:
+                pred_MET_p{x,y,t}, GenMET_p{x,y,t}, MET_p{x,y,t}
     """
     feature_names    = run_summary["feature_names"]
     target_transform = run_summary.get("cfg_target_transform", "none")
     batch_size       = run_summary["batch_size"]
 
+    stem = os.path.splitext(os.path.basename(file_path))[0]
+
+    # load dataset
     branches, data = _read_data(file_path)
 
     missing = [f for f in feature_names if f not in data]
     if missing:
-        raise ValueError(f"Missing features: {missing}")
+        raise ValueError(
+            f"Missing features: {missing}"
+        )
 
     X_new        = np.column_stack([data[f] for f in feature_names]).astype(np.float32)
     X_new_scaled = _apply_standardize(X_new, scaler["mean"], scaler["std"])
 
     # Raw prediction in transformed space
-    y_pred_transformed = model.predict(X_new_scaled, batch_size=batch_size, verbose=0)
+    y_pred = model.predict(X_new_scaled, batch_size=batch_size, verbose=0)
 
-    # Ground truth (already in GeV)
-    has_truth = ("GenMET_px" in data) and ("GenMET_py" in data)
-    if has_truth:
-        true_px = data["GenMET_px"]
-        true_py = data["GenMET_py"]
-    else:
-        true_px = true_py = None
-        print("    [WARNING] GenMET_px / GenMET_py not found - skipping truth metrics.")
-
-    # MET_pt required by response / residual transforms
+    # reconstructed MET required to transform
     has_reco = ("MET_px" in data) and ("MET_py" in data)
     if has_reco:
         reco_px  = data["MET_px"]
@@ -166,34 +132,52 @@ def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
         MET_pxpy = np.column_stack([reco_px, reco_py])
     else:
         MET_pxpy = None
-        if target_transform in ("response", "residual"):
-            raise ValueError(
-                f"target_transform='{target_transform}' requires MET_px / MET_py, "
-                "but they are missing from the dataset."
-            )
         print("    [WARNING] MET_px / MET_py not found - reco columns will be missing.")
 
-    # De-transform only the prediction to GeV
-    y_pred_gev = _pred_to_gev(y_pred_transformed, MET_pxpy, target_transform)
-    pred_px = y_pred_gev[:, 0]
-    pred_py = y_pred_gev[:, 1]
+    if target_transform == "residual":
+        if not has_reco:
+            raise ValueError(
+                "target_transform='residual' requires MET_px/MET_py to invert "
+                "the GenMET prediction, but they are not available."
+            )
+        y_pred_GeV = MET_pxpy - y_pred  # GenMET_pred = MET - residual_pred
+    elif target_transform == "none":
+        y_pred_GeV = y_pred
+    else:
+        raise ValueError(
+            f"predict_on_dataset does not support target_transform='{target_transform}'."
+        )
 
-    # Metrics (all in GeVs)
+    pred_px = y_pred_GeV[:, 0]
+    pred_py = y_pred_GeV[:, 1]
+
+    # Ground truth (already in GeV)
+    has_truth = ("GenMET_px" in data) and ("GenMET_py" in data)
     if has_truth:
-        print(f"\n  NN prediction vs GenMET_pt  [transform='{target_transform}']:")
+        true_px = data["GenMET_px"]
+        true_py = data["GenMET_py"]
+        y_true_GeV = np.column_stack([true_px, true_py])
+    else:
+        y_true_GeV = None
+        print("    [WARNING] GenMET_px / GenMET_py not found - skipping truth metrics.")
+
+    # metrics
+    if y_true_GeV is not None:
+
+        print("\n   Predicted MET vs GenMET")
         pred_pt, true_pt = _print_metrics(
             "Predicted", "GenMET",
             true_px, true_py, pred_px, pred_py
         )
 
         if has_reco:
-            print(f"\n  Reconstructed MET_pt vs GenMET_pt:")
+            print("\n   Reconstructed MET vs GenMET")
             reco_pt, _ = _print_metrics(
                 "Reco", "GenMET",
                 true_px, true_py, reco_px, reco_py
             )
 
-            print(f"\n  Improvement:")
+            print("\n   Improvement")
             for comp, true_v, pred_v, reco_v in [
                 ("px", true_px, pred_px, reco_px),
                 ("py", true_py, pred_py, reco_py),
@@ -203,13 +187,12 @@ def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
                 rmse_reco = np.sqrt(mean_squared_error(true_v, reco_v))
                 r2_pred   = r2_score(true_v, pred_v)
                 r2_reco   = r2_score(true_v, reco_v)
-                print(f"    {comp}  ->  DELTA_RMSE={rmse_reco - rmse_pred:+.4f} GeV  "
-                      f"DELTA_R2={r2_pred - r2_reco:+.4f}")
+                print(f"    {comp}  →  ΔRMSE={rmse_reco - rmse_pred:+.4f} GeV  "
+                      f"ΔR²={r2_pred - r2_reco:+.4f}")
 
-    # Save .parquet
+    # save parquet + scaled features for future SHAP (only if an output_dir was given)
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-        stem     = os.path.splitext(os.path.basename(file_path))[0]
         out_path = os.path.join(output_dir, f"predictions_{stem}.parquet")
 
         result_df = pd.DataFrame({
@@ -218,7 +201,7 @@ def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
             "pred_MET_pt": _compute_pt_from_components(pred_px, pred_py),
         })
 
-        if has_truth:
+        if y_true_GeV is not None:
             result_df["GenMET_px"] = true_px
             result_df["GenMET_py"] = true_py
             result_df["GenMET_pt"] = _compute_pt_from_components(true_px, true_py)
@@ -229,14 +212,13 @@ def predict_on_dataset(file_path: str, model, scaler: dict, run_summary: dict,
             result_df["MET_pt"] = _compute_pt_from_components(reco_px, reco_py)
 
         result_df.to_parquet(out_path, index=False)
-        print(f"\n  Saved -> {out_path}  |  columns: {list(result_df.columns)}")
+        print(f"\n  Saved in: {out_path}  |  columns: {list(result_df.columns)}")
 
         # saves X_test scaled for future SHAP
         x_df = pd.DataFrame(X_new_scaled, columns=feature_names)
         x_df.to_parquet(os.path.join(output_dir, f"X_test_scaled_{stem}.parquet"), index=False)
 
-    true_pxpy = (np.column_stack([true_px, true_py]) if has_truth else None)
-    return y_pred_gev, true_pxpy, MET_pxpy
+    return y_pred_GeV, y_true_GeV, MET_pxpy
 
 
 if __name__ == "__main__":

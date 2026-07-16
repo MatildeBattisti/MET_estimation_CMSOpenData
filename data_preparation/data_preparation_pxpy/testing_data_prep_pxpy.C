@@ -1,5 +1,5 @@
 /**
- * @file testing_data_preparation.C
+ * @file testing_data_prep_pxpy.C
  * @brief Keeps only selected branches for the testing datasets.
  */
 #include <ROOT/RDataFrame.hxx>
@@ -232,5 +232,5 @@ void testing_data_prep_pxpy(){
         firstTree = false;
     }
 
-    std::cout << "\nTesting data preparation completed. Output: " << output << std::endl;
+    std::cout << "\n[DONE] Testing data preparation completed. Output: " << output << std::endl;
 }

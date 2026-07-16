@@ -1,6 +1,7 @@
 /**
- * @file training_data_preparation.C
+ * @file training_data_prep_pt.C
  * @brief Merges raw .root files, drawing kSamplesPerFile random events from each.
+ *        MET, GenMET and Jet quantities are stored as pt/phi.
  */
 #include <ROOT/RDataFrame.hxx>
 #include <TFile.h>
@@ -23,7 +24,7 @@
  * @brief Sets per file samples number.
  * Set to -1 for no sampling.
  */
-const Long64_t kSamplesPerFile = 40000;
+const Long64_t kSamplesPerFile = 80000;  //40000;
 
 
 /**
@@ -96,13 +97,13 @@ const int kNJetSlots = 6;
 /**
  * @brief Main.
  */
-void training_data_preparation(){
+void training_data_prep_pt(){
     const std::string file1  = "../../OriginalTrainingDatasets/DYJetsToLL/4578E947-084C-C946-9B8D-1B45A126DCED.root";
-    const std::string file2  = "../../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
+    //const std::string file2  = "../../OriginalTrainingDatasets/HToAATo2Mu2B/6357E7BC-502C-2E45-A649-73A57B651715.root";
     const std::string file3  = "../../OriginalTrainingDatasets/ZZTo2L2Nu/DC33D4B8-4AF1-C94A-8F03-EDB634488D2B.root";
-    const std::string output = "../../TrainingDataset/training.root";
+    const std::string output = "../../TrainingDatasets/training_2d.root";
 
-    const std::vector<std::string> inputFiles = {file1, file2, file3};
+    const std::vector<std::string> inputFiles = {file1, file3};
 
     const std::vector<std::string> jetVecBranches = {
         "Jet_pt", "Jet_phi", "Jet_eta", "Jet_mass"
@@ -143,7 +144,7 @@ void training_data_preparation(){
 
     std::vector<std::string> tmpFiles;
     for (std::size_t i = 0; i < inputFiles.size(); ++i)
-        tmpFiles.push_back("../../TrainingDataset/tmp_sample_" + std::to_string(i) + ".root");
+        tmpFiles.push_back("../../TrainingDatasets/tmp_sample_" + std::to_string(i) + ".root");
 
     /**
      * @brief Per-file atomic counter loop (defined once, reset before each file)
@@ -170,14 +171,14 @@ void training_data_preparation(){
             // Random index set
             Long64_t nTotal = GetNEntries(inFile, treeName);
             if (nTotal <= 0) {
-                std::cerr << "  [ERROR] Could not read entry count.\n";
+                std::cerr << "[ERROR] Could not read entry count.\n";
                 continue;
             }
             std::cout << "  Total entries available: " << nTotal << "\n";
 
             Long64_t nDraw = (kSamplesPerFile < 0 || kSamplesPerFile >= nTotal)
                              ? nTotal : kSamplesPerFile;
-            std::cout << "  Drawing " << nDraw << " random entries "
+            std::cout << "  Drawing " << nDraw << " random entries."
                       << "(seed=" << (42 + (unsigned)fileIdx) << ")\n";
 
             auto chosen = RandomIndices(nTotal, nDraw, 42 + (unsigned)fileIdx);
@@ -190,15 +191,12 @@ void training_data_preparation(){
             // Build RDataFrame and apply random index filter
             ROOT::RDataFrame rdf_raw(treeName, inFile);
             ROOT::RDF::RNode rdf = rdf_raw
-                .Define("__entry_idx__",
-                    [counterPtr]() -> Long64_t {
-                        return counterPtr->fetch_add(1);
-                    }, {})
+                .Define("__entry_idx__", "rdfentry_")
                 .Filter(
-                    [indexSetPtr](Long64_t idx) {
+                    [indexSetPtr](ULong64_t idx) {
                         return indexSetPtr->count(idx) > 0;
                     },
-                    {"__entry_idx__"}, "Random index selection");
+                {"__entry_idx__"}, "Random index selection");
 
             // Expand jet vector branches into scalar slots
             std::vector<std::string> expandedCols;
@@ -253,13 +251,12 @@ void training_data_preparation(){
             opts.fCompressionLevel = 1;
 
             auto report = rdf.Report();
-            rdf.Snapshot(treeName, tmpFile, validBranches, opts);
-            report->Print();
+            auto nWritten = *rdf.Count();
 
-            TFile* fout = TFile::Open(output.c_str(), "READ");
-            TTree* tout = fout->Get<TTree>(treeName.c_str());
-            std::cout << " -> " << tout->GetEntries() << " written entries" << std::endl;
-            fout->Close();
+            rdf.Snapshot(treeName, tmpFile, validBranches, opts);
+
+            report->Print();
+            std::cout << " -> " << nWritten << " written entries" << std::endl;
 
             firstTreeInFile = false;
         }
@@ -274,19 +271,6 @@ void training_data_preparation(){
         merger.OutputFile(output.c_str(), "RECREATE");
         for (const auto& tmp : tmpFiles)
             merger.AddFile(tmp.c_str());
-        merger.Merge();
-    }
-
-    /**
-     * @brief Copies non-TTree objects from original inputs.
-     */
-    std::cout << "[INFO] Copying non-TTree objects from original inputs\n";
-    {
-        TFileMerger merger(kFALSE);
-        merger.OutputFile(output.c_str(), "UPDATE");
-        for (const auto& f : inputFiles)
-            merger.AddFile(f.c_str());
-        merger.SetNotrees(kTRUE);
         merger.Merge();
     }
 

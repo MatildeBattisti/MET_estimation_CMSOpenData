@@ -1,35 +1,36 @@
 import argparse
-from MET_pxpy_utils import (
+from MET_pxpy_newloss_utils import (
     _read_data, _data_parsing,
     _model_selection, _retraining,
     _save_model_and_scaler, _save_run_summary,
     mp, tf, keras, pd, os
-
 )
 
 
-VALID_TRANSFORMS = ("none", "response", "residual")
+VALID_TRANSFORMS = ("none", "residual")
 
 
 # Dataset training configuration
 DATASET_CFG = {
     # model regularization
     "clipnorm":              1.0,
-    "l2_reg":                1e-4,
-    "dropout_rate":          0.15,
+    "l2_reg":                1e-1,
+    "dropout_rate":          0.2,
     # LR schedule / early stopping
     "lr_patience":           40,
     "es_patience_search":    80,
     "es_patience_retrain":   60,
-    "rlrop_factor":          0.5,
+    "rlrop_factor":          0.7,
     "rlrop_min_delta":       1e-5,
     "rlrop_min_lr":          1e-7,
     # training loop
-    "max_epochs_search":     2000,
-    "max_epochs_retrain":    3000,
+    "max_epochs_search":     1500,
+    "max_epochs_retrain":    2000,
     "retrain_val_fraction":  0.15,
-    "target_transform":      "none",
-    "response_met_min":      10.0,     # try 10, 20, 30 GeV
+    "target_transform":      "none",  # overridden by --transform
+    # pt-penalized loss: MSE + lambda_pt * 1{|GenMET| > genmet_threshold} * (|MET_pred|/|GenMET| - 1)^2
+    "lambda_pt":             1.0,
+    "genmet_threshold":      20.0,  # GeV
     # CV
     "random_seed_kfold":     42,
     "n_folds":               3,
@@ -49,7 +50,7 @@ HPARAM_GRID = {
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Train MET_pxpy model.",
+        description="Train MET_unified model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -68,9 +69,9 @@ def _parse_args():
         dest="output_dir",
         help=(
             "Directory where results are saved. "
-            "Overrides the default '../Results/results_pxpy'. "
+            "Overrides the default '../Results/results_pxpy_newloss_2d'. "
             "If not given but --transform is set, defaults to "
-            "'../Results/results_pxpy_<transform>'."
+            "'../Results/results_pxpy_newloss_<transform>_2d'."
         ),
     )
     return parser.parse_args()
@@ -90,20 +91,20 @@ if __name__ == "__main__":
     if args.output_dir is not None:
         OUTPUT_DIR = args.output_dir
     elif args.transform is not None:
-        OUTPUT_DIR = f"../Results/results_pxpy_{transform}"
+        OUTPUT_DIR = f"../Results/results_pxpy_newloss_{transform}_2d"
     else:
-        OUTPUT_DIR = "../Results/results_pxpy"
+        OUTPUT_DIR = "../Results/results_pxpy_newloss_2d"
 
     print(f"target_transform : '{transform}'")
-    print(f"results_dir      : '{OUTPUT_DIR}'")
+    print(f"output_dir       : '{OUTPUT_DIR}'")
 
     import tracemalloc
     tracemalloc.start()
     
-    print(f"Keras version:      {keras.__version__}")
+    print(f"Keras version: {keras.__version__}")
     print(f"Tensorflow version: {tf.__version__}")
     
-    INPUT_FILE = f"../TrainingDatasets/training_pxpy_2d.root"
+    INPUT_FILE = f"../TrainingDatasets/training_pxpy_2datasets.root"
 
     print("GPUs available:", tf.config.list_physical_devices("GPU"))
     
@@ -118,7 +119,7 @@ if __name__ == "__main__":
      best_params, target_train_loss,
      best_fold_histories, best_cv_metrics,
      topk_buffer) = _model_selection(
-        features, target, HPARAM_GRID, OUTPUT_DIR, DATASET_CFG
+        features, target, MET_pxpy, HPARAM_GRID, OUTPUT_DIR, DATASET_CFG
     )
 
     # Saves CV folds learning curves
@@ -150,7 +151,7 @@ if __name__ == "__main__":
         output_dir=OUTPUT_DIR
     )
 
-    # Save retraining learning curve for external plotting
+    # Save retraining learning curve
     pd.DataFrame(history.history).to_parquet(
         os.path.join(OUTPUT_DIR, f"learning_curves_pxpy.parquet"), index=False
     )

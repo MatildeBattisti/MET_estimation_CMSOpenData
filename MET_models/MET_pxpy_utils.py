@@ -1,14 +1,7 @@
-# CONTROLLA SE LASCIARE SOLO DENTRO PROCESS
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-from pyexpat import features
 import warnings
 warnings.filterwarnings("ignore")
-import absl.logging
-absl.logging.set_verbosity(absl.logging.ERROR)
-import logging
-logging.getLogger("tensorflow").setLevel(logging.ERROR)
-#
 import uproot
 import gc
 import json
@@ -17,7 +10,7 @@ import tensorflow as tf
 import keras
 from keras.models import Sequential
 from keras.regularizers import l2
-from keras.layers import Input, Dense, ReLU
+from keras.layers import Input, Dense, Dropout, ReLU
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from keras.optimizers import Adam
 from sklearn.model_selection import KFold, train_test_split
@@ -51,9 +44,9 @@ def _read_data(file_path: str):
         # Load all branches into a pandas DataFrame
         df = tree.arrays(library="pd")
 
-    if "GenMET_px" or "GenMET_py" not in df.columns:
+    if "GenMET_px" not in df.columns or "GenMET_py" not in df.columns:
         raise ValueError(
-            "Targets not found in the ROOT file."
+            "Columns 'GenMET_px' and/or 'GenMET_py' (targets) not found in the ROOT file."
         )
 
     branches = list(df.columns)
@@ -61,39 +54,89 @@ def _read_data(file_path: str):
 
     print(
         f"Loaded dataset '{filename}' "
-        f"(tree 'Events') — {len(branches)} branches, {len(df)} events."
+        f"(tree 'Events') - {len(branches)} branches, {len(df)} events."
     )
     return branches, data
 
 
-def _data_parsing(branches: list, data: dict):
+def _data_parsing(branches: list, data: dict, cfg: dict):
     """
-        Splits the branch dictionary into a feature matrix X and a target
-        matrix y with shape (N, 2), where the two columns are GenMET_px and
-        GenMET_py (in that order).  Every other column is used as a feature.
-    """
-    TARGET_COLS   = ["GenMET_px", "GenMET_py"]
-    target_set    = set(TARGET_COLS)
-    feature_names = [b for b in branches if b not in target_set]
- 
-    features = np.column_stack([data[name] for name in feature_names])
-    target   = np.column_stack([data[name] for name in TARGET_COLS])
- 
-    print(f"Shape of features and target:")
-    print(f"    (N events, N features): {features.shape}")
-    print(f"    (N events, N targets):  {target.shape}  "
-          f"[cols: {TARGET_COLS}]")
-    return features, target, feature_names
+        Builds feature matrix X, target matrix y with shape (N, 2) for
+        [GenMET_px, GenMET_py], and MET_px / MET_py arrays (used when
+        target_transform requires them).
 
+        cfg["target_transform"]:
+          "none"     -> target = [GenMET_px, GenMET_py];      MET_p{x,y} are features
+          "response" -> target = GenMET_p{x,y} / MET_p{x,y};  MET_p{x,y} NOT features (leakage)
+          "residual" -> target = MET_p{x,y} - GenMET_p{x,y};  MET_p{x,y} NOT features (leakage)
+    """
+    TARGET_COLS = ["GenMET_px", "GenMET_py"]
+    MET_COLS    = ["MET_px", "MET_py"]
+    transform   = cfg.get("target_transform", "none")
+
+    for col in TARGET_COLS + MET_COLS:
+        if col not in branches:
+            raise ValueError(f"Column '{col}' not found.")
+
+    MET_used_in_target = transform in ("response", "residual")
+    exclude = set(TARGET_COLS) | (set(MET_COLS) if MET_used_in_target else set())
+
+    feature_names = [b for b in branches if b not in exclude]
+    features      = np.column_stack([data[name] for name in feature_names])
+    GenMET_px = data["GenMET_px"]
+    GenMET_py = data["GenMET_py"]
+    MET_px    = data["MET_px"]
+    MET_py    = data["MET_py"]
+
+    if transform == "none":
+        target = np.column_stack([GenMET_px, GenMET_py])
+    elif transform == "response":
+        # Lower GenMET_pt and MET_pt filter (non-reliable physics)
+        GenMET_min = cfg.get("response_met_min", 20.0)  # GeV
+        MET_min = cfg.get("response_met_min", 20.0)  # GeV
+        MET_mask = (
+            (np.abs(GenMET_px) >= GenMET_min) & (np.abs(GenMET_py) >= GenMET_min) &
+            (np.abs(MET_px) >= MET_min) & (np.abs(MET_py) >= MET_min)
+        )
+        print(f"Removed: {(~MET_mask).sum()} events. "
+              f"({(~MET_mask).mean()*100:.1f}%)")
+
+        features  = features[MET_mask]
+        GenMET_px = GenMET_px[MET_mask]
+        GenMET_py = GenMET_py[MET_mask]
+        MET_px    = MET_px[MET_mask]
+        MET_py    = MET_py[MET_mask]
+
+        target = np.column_stack([
+            GenMET_px / MET_px,
+            GenMET_py / MET_py,
+        ])
+    elif transform == "residual":
+        target = np.column_stack([
+            MET_px - GenMET_px,
+            MET_py - GenMET_py,
+        ])
+    else:
+        raise ValueError(f"target_transform unknown: '{transform}'")
+    
+    MET_pxpy = np.column_stack([MET_px, MET_py])
+
+    print(f"target_transform:        '{transform}'")
+    print(f"MET_p{{x,y}} as features: {not MET_used_in_target}")
+    print(f"    features shape:       {features.shape}")
+    print(f"    target   shape:       {target.shape}  [cols: {TARGET_COLS}]")
+    return features, target, MET_pxpy, feature_names
 
 
 def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
-                  clipnorm: float = None, l2_reg: float = 0.0):
+                  clipnorm: float = None, l2_reg: float = 0.0,
+                  dropout_rate: float = 0.0):
     """
         Builds a Sequential model.
 
-        When non-zero, l2_reg applies L2 weight regularization to each dense layer
-        to penalize large weights and reduce overfitting.
+        When non-zero, l2_reg applies L2 weight regularization to each dense layer.
+
+        When non-zero, dropout_rate adds a Dropout layer after each hidden ReLU.
 
         When non-zero, clipnorm in Adam clips the gradient norm to prevent large
         destabilising updates.
@@ -105,7 +148,9 @@ def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
 
     for n_units in architecture:
         model.add(Dense(n_units, kernel_regularizer=regularizer))
-        model.add(keras.layers.ReLU())
+        model.add(ReLU())
+        if dropout_rate > 0.0:
+            model.add(Dropout(rate=dropout_rate))
 
     model.add(Dense(2, activation="linear"))
 
@@ -123,19 +168,18 @@ def _create_model(input_dim: int, architecture: tuple, learning_rate: float,
 
 def _standardize(x_tr: np.ndarray, x_val: np.ndarray):
     """
-        Computes mean and std on x_tr only, then applies the same transformation
-        to both x_tr and x_val. Columns with zero std are left unchanged (std=1).
+        Computes mean and std on training only, then applies the same transformation
+        to both training and validation. Columns with zero std are left unchanged (std=1).
 
         Returns the scaled arrays and the scaling parameters so that the caller
-        can apply the same transform to new data (e.g. the test set at retraining).
+        can apply the same transform to new data.
     """
     mean = x_tr.mean(axis=0)
     std  = x_tr.std(axis=0)
     std  = np.where(std == 0, 1.0, std)
 
-    x_tr_scaled  = (x_tr  - mean) / std
+    x_tr_scaled  = (x_tr - mean) / std
     x_val_scaled = (x_val - mean) / std
-
     return x_tr_scaled, x_val_scaled, mean, std
 
 
@@ -144,22 +188,6 @@ def _apply_standardize(x: np.ndarray, mean: np.ndarray, std: np.ndarray):
         Applies a pre-computed (mean, std) standardization to a new array.
     """
     return (x - mean) / std
-
-
-def _build_tensorflow_dataset(X: np.ndarray, y: np.ndarray, batch_size: int,
-                               shuffle: bool = True) -> tf.data.Dataset:
-    """
-        Wraps numpy arrays into a tf.data.Dataset for mini-batch training.
-          - shuffle=True  for training splits (new shuffle order each epoch)
-          - shuffle=False for validation / test splits
-    """
-    ds = tf.data.Dataset.from_tensor_slices(
-        (X.astype(np.float32), y.astype(np.float32))
-    )
-    if shuffle:
-        ds = ds.shuffle(buffer_size=len(X), reshuffle_each_iteration=True)
-    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return ds
 
 
 def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
@@ -213,6 +241,7 @@ def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
             learning_rate = params["learning_rate"],
             clipnorm      = cfg["clipnorm"],
             l2_reg        = cfg["l2_reg"],
+            dropout_rate  = cfg["dropout_rate"],
         )
 
         early_stop = EarlyStopping(
@@ -235,7 +264,7 @@ def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
             validation_data = (x_val, y_val),
             verbose         = 0,
             callbacks       = [early_stop, reduce_lr],
-            shuffle=True
+            shuffle         = True
         )
 
         best_ep_idx        = int(np.argmin(history.history["val_loss"]))
@@ -247,48 +276,39 @@ def _run_fold(queue, x_tr, y_tr, x_val, y_val, params, cfg, fold_idx):
             "fold":               fold_idx,
             "rmse":               rmse,
             "train_loss_at_best": train_loss_at_best,
-            "loss":     [float(v) for v in history.history["loss"]],
-            "val_loss": [float(v) for v in history.history["val_loss"]],
+            "loss":               [float(v) for v in history.history["loss"]],
+            "val_loss":           [float(v) for v in history.history["val_loss"]],
             "epochs_run":         len(history.history["loss"]),
         })
 
     except Exception as e:
-        # Garantees that the father does not get blocked on queue.get() event if the child crashes.
+        # Guarantees that the father does not get blocked on queue.get() even if the child crashes.
         queue.put({"error": str(e), "fold": fold_idx})
     return
 
 
-def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
+def _model_selection(features: np.ndarray, target: np.ndarray,
+                     hparam_grid,
                      output_dir: str, cfg: dict):
     """
-        2. Standardizes each fold independently: mean and std are computed on
+        1. Standardizes each fold independently: mean and std are computed on
            x_tr only and applied to both x_tr and x_val, avoiding any leakage
            from validation data into the scaling parameters.
-        3. Each fold is executed in a separate subprocess (spawn) to work around
+        2. Each fold is executed in a separate subprocess (spawn) to work around
            the Keras 3 + TF 2.19 memory leak in ops.py that clear_session()
            cannot resolve. The subprocess exits after the fold, freeing all TF
            memory automatically.
-        4. Selects best hyper-parameters by lowest average validation RMSE.
-        5. Saves only the top-10 hyper-parameter combinations to a CSV file.
-        6. Keeps fold histories for the top-10 combos by avg validation RMSE.
-        7. After the search, computes scaling parameters on the full X_train and
+        3. Selects best hyper-parameters by lowest average validation RMSE.
+        4. Saves only the top-10 hyper-parameter combinations to a CSV file.
+        5. Keeps fold histories for the top-10 combos by avg validation RMSE.
+        6. After the search, computes scaling parameters on the full X_train and
            applies them to both X_train and X_test for use in retraining. These
            parameters are returned so they can be saved and reused on new data.
-
-        Memory management:
-        - topk_buffer holds at most TOP_K (10) (avg_rmse, row, fold_histories)
-          triples. When a new entry exceeds the limit the worst entry is popped
-          and its histories freed.
-        - all_results is never accumulated: each combo row goes straight into
-          topk_buffer, keeping memory O(TOP_K) throughout.
     """
     starting_time = time.time()
 
-    X_train = features
-    y_train = target.copy()
-
-    if cfg["target_transform"] == "log1p":
-        y_train = np.log1p(y_train)
+    X_train      = features
+    y_train      = target.copy()
 
     kf = KFold(n_splits=cfg["n_folds"], shuffle=True, random_state=cfg["random_seed_kfold"])
     param_combinations = list(product(*hparam_grid.values()))
@@ -364,7 +384,7 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
         std_rmse              = np.std(val_scores)
         avg_target_train_loss = float(np.mean(best_train_loss_per_fold))
 
-        print(f"        Avg RMSE: {avg_rmse:.4f} +/- {std_rmse:.4f}  |  "
+        print(f"    FOLD STATS:\n       Avg RMSE: {avg_rmse:.4f} +/- {std_rmse:.4f}  |  "
               f"Avg train loss at best val epoch: {avg_target_train_loss:.4f}  "
               f"{[f'{v:.4f}' for v in best_train_loss_per_fold]}\n")
 
@@ -390,15 +410,15 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
         gc.collect()
 
     os.makedirs(output_dir, exist_ok=True)
-    hparam_log_path = os.path.join(output_dir, f"hparam_search_results_pxpy.csv")
+    hparam_log_path = os.path.join(output_dir, "hparam_search_results_pxpy.csv")
     topk_rows = [row for _, row, _ in topk_buffer]
     pd.DataFrame(topk_rows).sort_values("avg_rmse").to_csv(hparam_log_path, index=False)
 
     elapsed = time.time() - starting_time
     print(f"BEST PARAMETERS: {best_params}")
-    print(f"    Best Avg RMSE:              {best_score:.4f}")
+    print(f"    Best Avg RMSE:               {best_score:.4f}")
     print(f"    Target train loss (retrain): {target_train_loss:.4f}")
-    print(f"    Completed in:               {elapsed:.1f}s")
+    print(f"    Completed in:                {elapsed:.1f}s")
 
     best_row = next(row for _, row, _ in topk_buffer if row["avg_rmse"] == best_score)
 
@@ -417,51 +437,81 @@ def _model_selection(features: np.ndarray, target: np.ndarray, hparam_grid,
             topk_buffer)
 
 
+def _to_gev(y_true_transformed: np.ndarray,
+            y_pred_transformed: np.ndarray,
+            MET_pxpy: np.ndarray | None,
+            transform: str):
+    """
+        Helper function to return both the target and prediction in unit measure [GeV].
+
+        none     : y = [GenMET_px, GenMET_py]     -> identity;
+        response : y = GenMET_p{x,y} / MET_p{x,y} -> y * MET_p{x,y};
+        residual : y = MET_p{x,y} - GenMET_p{x,y} -> MET_p{x,y} - y.
+    """
+    if transform == "none":
+        return y_true_transformed, y_pred_transformed
+
+    elif transform == "response":
+        if MET_pxpy is None:
+            raise ValueError("MET_pxpy is None but target_transform='response'")
+        return y_true_transformed * MET_pxpy, y_pred_transformed * MET_pxpy
+
+    elif transform == "residual":
+        if MET_pxpy is None:
+            raise ValueError("MET_pxpy is None but target_transform='residual'")
+        return MET_pxpy - y_true_transformed, MET_pxpy - y_pred_transformed
+
+    else:
+        raise ValueError(f"Unknown target_transform: '{transform}'")
+    return
+    
+
 def _retraining(X_train: np.ndarray, y_train: np.ndarray,
+                MET_pxpy: np.ndarray,
                 best_params: dict, cfg: dict,
                 target_train_loss: float):
     """
         Retrains on the full training set using a held-out validation split
         (drawn from X_train) for early stopping.
- 
-        y_train has shape (N, 2) - columns [GenMET_px, GenMET_py].
- 
-        The scaler (mean, std) is fit on X_tr (features only; targets are not
-        scaled) before the val split is carved out.
- 
+
+        The scaler (mean, std) is fit on X_tr before the val split is carved
+        out, but after the train/val split so no leakage occurs.
+
         Returns the fitted scaler so it can be persisted alongside the model.
     """
     starting_time = time.time()
- 
+
     # validation split for early stopping
+    transform    = cfg.get("target_transform", "none")
     val_fraction = cfg.get("retrain_val_fraction", 0.1)
     n_val        = max(1, int(len(X_train) * val_fraction))
     rng          = np.random.default_rng(cfg.get("random_seed_split", 42))
     val_idx      = rng.choice(len(X_train), size=n_val, replace=False)
     train_mask   = np.ones(len(X_train), dtype=bool)
     train_mask[val_idx] = False
- 
+
     X_tr, X_val = X_train[train_mask], X_train[val_idx]
     y_tr, y_val = y_train[train_mask], y_train[val_idx]   # both (N, 2)
- 
-    # standardize features (fit on X_tr only)
-    X_tr,  X_val,  scaler_mean, scaler_std = _standardize(X_tr, X_val)
- 
+
+    # MET_pxpy for transforming back (None otherwise)
+    MET_pxpy_tr = MET_pxpy[train_mask] if MET_pxpy is not None else None
+    # standardize (fit on X_tr only)
+    X_tr, X_val, scaler_mean, scaler_std = _standardize(X_tr, X_val)
+
     print(f"Retraining on full training set  "
           f"(train={len(X_tr)}, val={len(X_val)}).")
+    print(f"    Target transform:            '{transform}'")
     print(f"    Target train loss (from CV):  {target_train_loss:.4f}")
- 
-    train_ds = _build_tensorflow_dataset(X_tr, y_tr, best_params["batch_size"], shuffle=True)
-    val_ds   = _build_tensorflow_dataset(X_val, y_val, best_params["batch_size"], shuffle=False)
- 
+
     best_model = _create_model(
-        input_dim    = X_tr.shape[1],
-        architecture = best_params["architecture"],
-        learning_rate= best_params["learning_rate"],
-        clipnorm     = cfg["clipnorm"],
-        l2_reg       = cfg["l2_reg"],
+        input_dim     = X_tr.shape[1],
+        architecture  = best_params["architecture"],
+        learning_rate = best_params["learning_rate"],
+        clipnorm      = cfg["clipnorm"],
+        l2_reg        = cfg["l2_reg"],
+        dropout_rate  = cfg["dropout_rate"],
     )
- 
+
     early_stop = EarlyStopping(
         monitor="val_loss",
         patience=cfg["es_patience_retrain"],
@@ -476,67 +526,61 @@ def _retraining(X_train: np.ndarray, y_train: np.ndarray,
         min_lr=cfg["rlrop_min_lr"],
         verbose=1,
     )
- 
+
     history = best_model.fit(
-        train_ds,
+        X_tr, y_tr,
+        batch_size      = best_params["batch_size"],
         epochs          = cfg["max_epochs_retrain"],
-        validation_data = val_ds,
+        validation_data = (X_val, y_val),
         verbose         = 1,
         callbacks       = [early_stop, reduce_lr],
+        shuffle         = True,
     )
- 
-    # predictions - shape (N, 2)
+
+    # predictions in transformed space - shape (N, 2)
     y_train_pred = best_model.predict(X_tr, batch_size=best_params["batch_size"], verbose=0)
- 
-    # de-transform if needed
-    if cfg["target_transform"] == "log1p":
-        y_tr_GeV         = np.expm1(y_tr)
-        y_train_pred_GeV = np.expm1(y_train_pred)
-    else:
-        y_tr_GeV         = y_tr
-        y_train_pred_GeV = y_train_pred
- 
+
+    # de-transforming to GeV for final metrics
+    y_tr_GeV, y_pred_GeV = _to_gev(y_tr, y_train_pred, MET_pxpy_tr, transform)
+
     # MSE averaged over both components and all events
-    train_mse  = float(mean_squared_error(y_tr_GeV, y_train_pred_GeV))
+    train_mse  = float(mean_squared_error(y_tr_GeV, y_pred_GeV))
     train_rmse = float(np.sqrt(train_mse))
- 
+
     # Per-component RMSE for diagnostics
-    rmse_px = float(np.sqrt(mean_squared_error(y_tr_GeV[:, 0], y_train_pred_GeV[:, 0])))
-    rmse_py = float(np.sqrt(mean_squared_error(y_tr_GeV[:, 1], y_train_pred_GeV[:, 1])))
- 
+    rmse_px = float(np.sqrt(mean_squared_error(y_tr_GeV[:, 0], y_pred_GeV[:, 0])))
+    rmse_py = float(np.sqrt(mean_squared_error(y_tr_GeV[:, 1], y_pred_GeV[:, 1])))
+
     retrain_metrics = {
-        "retrain_train_mse":   train_mse,
-        "retrain_train_rmse":  train_rmse,
+        "retrain_train_mse":     train_mse,
+        "retrain_train_rmse":    train_rmse,
         "retrain_train_rmse_px": rmse_px,
         "retrain_train_rmse_py": rmse_py,
     }
- 
-    print(f"  Train  MSE={train_mse:.4f}  RMSE={train_rmse:.4f}  "
+
+    print(f"\nRetrain    MSE={train_mse:.4f}, RMSE={train_rmse:.4f}, "
           f"(RMSE_px={rmse_px:.4f}, RMSE_py={rmse_py:.4f})")
- 
+
     elapsed = time.time() - starting_time
     print(f"Retraining completed in {elapsed:.1f}s")
- 
+
     scaler = {"mean": scaler_mean, "std": scaler_std}
     return (history, best_model, retrain_metrics, scaler)
 
 
 def _save_model_and_scaler(model, scaler: dict, output_dir: str):
     """
-        Persists everything needed to run inference on a new dataset without
+        Saves everything needed to run inference on a new dataset without
         retraining:
 
             <output_dir>/
-                model_pxpy.keras      — full Keras model (weights + architecture)
-                scaler_pxpy.npz       — mean and std arrays used for standardization
-
-        The .json also records the ordered list of feature names so that a new
-        dataset can be validated against the expected schema before prediction.
+                model_pxpy.keras - full Keras model (weights + architecture)
+                scaler_pxpy.npz  - mean and std arrays used for standardization
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    model_path  = os.path.join(output_dir, f"model_pxpy.keras")
-    scaler_path = os.path.join(output_dir, f"scaler_pxpy.npz")
+    model_path  = os.path.join(output_dir, "model_pxpy.keras")
+    scaler_path = os.path.join(output_dir, "scaler_pxpy.npz")
 
     model.save(model_path)
 
@@ -560,27 +604,27 @@ def _save_run_summary(best_params: dict, cfg: dict,
           - retraining train MSE/RMSE (global + per-component px/py)
     """
     run_summary_path = os.path.join(output_dir, "run_summary_pxpy.json")
- 
+
     run_summary = {
-        "feature_names":    feature_names,
-        "target_names":     ["GenMET_px", "GenMET_py"],
-        "architecture":  str(best_params["architecture"]),
-        "batch_size":    best_params["batch_size"],
-        "learning_rate": best_params["learning_rate"],
+        "feature_names":                 feature_names,
+        "target_names":                  ["GenMET_px", "GenMET_py"],
+        "architecture":                  str(best_params["architecture"]),
+        "batch_size":                    best_params["batch_size"],
+        "learning_rate":                 best_params["learning_rate"],
         **{f"cfg_{k}": v for k, v in cfg.items()},
-        "cv_n_folds":         best_cv_metrics["cv_n_folds"],
-        "cv_avg_train_mse":   best_cv_metrics["cv_avg_train_mse"],
-        "cv_avg_train_rmse":  best_cv_metrics["cv_avg_train_rmse"],
-        "cv_avg_val_mse":     best_cv_metrics["cv_avg_val_mse"],
-        "cv_avg_val_rmse":    best_cv_metrics["cv_avg_val_rmse"],
-        "cv_std_val_rmse":    best_cv_metrics["cv_std_val_rmse"],
-        "retrain_train_mse":     retrain_metrics["retrain_train_mse"],
-        "retrain_train_rmse":    retrain_metrics["retrain_train_rmse"],
-        "retrain_train_rmse_px": retrain_metrics["retrain_train_rmse_px"],
-        "retrain_train_rmse_py": retrain_metrics["retrain_train_rmse_py"],
+        "cv_n_folds":                    best_cv_metrics["cv_n_folds"],
+        "cv_avg_train_mse_transformed":  best_cv_metrics["cv_avg_train_mse"],
+        "cv_avg_train_rmse_transformed": best_cv_metrics["cv_avg_train_rmse"],
+        "cv_avg_val_mse_transformed":    best_cv_metrics["cv_avg_val_mse"],
+        "cv_avg_val_rmse_transformed":   best_cv_metrics["cv_avg_val_rmse"],
+        "cv_std_val_rmse_transformed":   best_cv_metrics["cv_std_val_rmse"],
+        "retrain_train_mse_gev":         retrain_metrics["retrain_train_mse"],
+        "retrain_train_rmse_gev":        retrain_metrics["retrain_train_rmse"],
+        "retrain_train_rmse_px_gev":     retrain_metrics["retrain_train_rmse_px"],
+        "retrain_train_rmse_py_gev":     retrain_metrics["retrain_train_rmse_py"],
     }
     with open(run_summary_path, "w") as f:
         json.dump(run_summary, f, indent=2)
- 
+
     print(f"Run summary saved to {run_summary_path}")
     return

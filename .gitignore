@@ -1,4 +1,4 @@
-#VSCode stuff
+# VSCode stuff
 .vscode/
 
 # ROOT files
@@ -7,15 +7,22 @@
 # Virtual environment
 venv/
 
+# Pycache
+MET_models/__pycache__/
+*.pyc
+
 # Typst files for documentation
 *.typvenv/
 *.typ
 
-# Ignore parquet files
+# parquet files
 *.parquet
 
-# Ignore csv files
+# csv files
 *.csv
 
-# Ignore keras files
+# keras files
 *.keras
+
+# png
+*.png
