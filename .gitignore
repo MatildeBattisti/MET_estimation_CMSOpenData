@@ -21,8 +21,17 @@ MET_models/__pycache__/
 # csv files
 *.csv
 
+# json files
+*.json
+
+# npz files
+*.npz
+
 # keras files
 *.keras
 
 # png
 *.png
+
+# pdf
+*.pdf
