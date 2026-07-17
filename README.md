@@ -41,15 +41,13 @@ Finally, the **HToAATo2Mu2B** process does not include neutrinos in its primary 
 
 ### Data Understanding (`data_understanding/`)
 
-The `data_understanding/` folder contains an exploratory analysis of single-value features, performed on each datasets to assess data quality and understand the distributions of relevant observables.
+The `data_understanding/` folder contains an exploratory analysis of single-value features, performed on each dataset to assess data quality and understand the distributions of relevant observables.
 
 ### Data Preparation (`data_preparation/`)
 
 The `data_preparation/` folder contains the scripts used to clean and filter the raw datasets. Only the common features relevant to the selected physics processes are retained, while all others are discarded. The selection is entirely deterministic: no statistical outlier removal is performed, preserving the original event distributions and the generalization capability of the downstream machine learning model. Features used exclusively for exploratory analysis are removed at this stage.
 
-The three training datasets are balanced and merged into a single training set. The corresponding testing datasets undergo the same preprocessing pipeline but are kept separate to enable process-wise evaluation of the trained model.
-
-The same applies if we only use two datasets for training.
+The three training datasets are balanced and merged into a single training set. The corresponding testing datasets undergo the same preprocessing pipeline but are kept separate to enable the evaluation of the trained model.
 
 ### Machine Learning Models (`MET_models`)
 
@@ -60,7 +58,7 @@ The `MET_models/` folder contains four Keras neural network models:
 - **MET_pxpy_newloss** predicts `GenMET_px` and `GenMET_py` (and their transformed variants) using the same combined loss.
 
 All models follow the same training pipeline:
-- hyperparameters are optimized through a grid search with 3-fold cross-validation on the training dataset. During this stage, the training on each fold is stopped early when the validation loss no longer improves;
+- hyperparameters are tuned through a grid search with 3-fold cross-validation on the training dataset. During this stage, the training on each fold is stopped early when the validation loss no longer improves;
 - the best hyperparameter configuration is then used to retrain the model on a dedicated training subset while monitoring performance on a validation subset;
 - the trained model weights, the feature standardization parameters (mean and standard deviation), and a run summary containing the training configuration (e.g. feature names, target transformation, batch size, and other parameters) are saved for subsequent evaluation on the independent test datasets.
 
