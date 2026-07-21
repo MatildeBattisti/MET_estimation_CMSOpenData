@@ -58,7 +58,7 @@ const std::vector<std::string> Branches = {
 /**
  * @brief Main.
  */
-void skimming_data_understanding() {
+void data_understanding() {
     /**
      * @brief Builds RDataFrame directly from the TChain-equivalent:
      * - first argument is the TTree name

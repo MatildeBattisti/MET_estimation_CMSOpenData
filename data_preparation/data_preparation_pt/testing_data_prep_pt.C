@@ -44,7 +44,7 @@ const int kNJetSlots = 6;
 /**
  * @brief Main.
  */
-void testing_data_preparation(){
+void testing_data_prep_pt(){
     const std::string input = "../../OriginalTestingDatasets/HToAATo2Mu2B/DB4AFAC8-16AD-AB48-82D2-1E9DAE8AB314.root";
     const std::string output = "../../TestingDatasets/testing_HToAATo2Mu2B.root";
 
